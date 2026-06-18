@@ -1,6 +1,6 @@
 {
 	"name": "@liiift-studio/axisrhythm",
-	"version": "1.1.16",
+	"version": "1.1.17",
 	"description": "Deliberate variable font axis rhythm across paragraph lines — alternating wdth/wght values for typographic texture",
 	"type": "module",
 	"main": "dist/index.cjs",
