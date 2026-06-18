@@ -4,9 +4,11 @@
 
 CSS applies `font-variation-settings` to the whole element — every line gets the same axis value. Axis Rhythm works line by line, cycling any OpenType axis through a sequence of values across paragraph lines. The result is a texture the eye reads as rhythm, not noise. Like column highlighting for text.
 
+![A paragraph where the font weight axis alternates line by line — odd lines bold, even lines light — yet the text reads as a single block](https://raw.githubusercontent.com/Liiift-Studio/AxisRhythm/main/assets/hero.png?v=1)
+
 **[axisrhythm.com](https://axisrhythm.com)** · [npm](https://www.npmjs.com/package/@liiift-studio/axisrhythm) · [GitHub](https://github.com/Liiift-Studio/AxisRhythm)
 
-TypeScript · Zero dependencies · React + Vanilla JS
+TypeScript · Zero runtime dependencies · ~4.8 kB gzipped · React optional · Vanilla JS
 
 ---
 
@@ -23,6 +25,24 @@ npm install @liiift-studio/axisrhythm
 > **Next.js App Router:** this library uses browser APIs. Add `"use client"` to any component file that imports from it.
 
 > **Variable font required:** Axis Rhythm sets `font-variation-settings` per line. The target font must support the axis you specify (e.g. a font with a `wdth` axis for `axis: 'wdth'`). The effect is invisible with fonts that do not have variable axis support.
+
+Load a variable font with the axis you want to cycle, and request its axes explicitly so a static instance does not load. With a CSS `@font-face`:
+
+```css
+@font-face {
+  font-family: "Merriweather VF";
+  src: url("/fonts/Merriweather.woff2") format("woff2");
+  font-weight: 300 900;       /* declares the wght axis range */
+  font-stretch: 87% 112%;     /* declares the wdth axis range */
+  font-display: swap;
+}
+```
+
+```css
+.rhythm { font-family: "Merriweather VF", serif; }
+```
+
+Declare the range for whichever axis you cycle (`font-weight` for `wght`, `font-stretch` for `wdth`); other axes are reached through `font-variation-settings`. With Google Fonts, include the axes in the URL — `...family=Recursive:wght@300..900` — or the browser fetches a single static instance and the effect is invisible.
 
 ### React component
 
@@ -107,6 +127,8 @@ const opts: AxisRhythmOptions = { axis: 'wdth', values: [100, 88], period: 2 }
 
 ## How it works
 
+![Side by side: the same paragraph set in plain CSS at one weight, versus Axis Rhythm cycling the weight axis line by line — both read as a single block, but the right pane carries a per-line texture](https://raw.githubusercontent.com/Liiift-Studio/AxisRhythm/main/assets/before-after.png?v=1)
+
 The algorithm detects visual lines by measuring word span positions with `getBoundingClientRect()`, then wraps each line in a `<span>` with its own `font-variation-settings`. The injected value overrides only the target axis — all other axes set on the parent element are preserved by reading and patching the computed `fontVariationSettings` string before writing. Runs on mount and on every resize via `ResizeObserver`. Re-runs when fonts finish loading (`document.fonts.ready`). The effect is skipped entirely if `prefers-reduced-motion: reduce` is set.
 
 **Line break safety:** Each run starts from the original HTML, detects lines at the element's natural layout, then locks them with `white-space: nowrap`. Word breaks never change as a result of the axis variation.
@@ -114,6 +136,16 @@ The algorithm detects visual lines by measuring word span positions with `getBou
 **Width overflow:** Applying different axis values per line alters character widths, so lines may grow wider or narrower than the container. `linePreservation: 'none'` (default) is appropriate for display or headline type where the axis range is large and overflow is intentional. For body text — or any context where line edges must stay flush — use `linePreservation: 'spacing'` (adjusts letter-spacing to compensate) or `'scale'` (GPU scaleX transform).
 
 The `linePreservation` pass measures each line's natural width before applying the axis value, then applies axis and measures again. The delta becomes either a letter-spacing correction (`'spacing'`) or a `scaleX` transform (`'scale'`) per line.
+
+---
+
+## Requirements & rendering
+
+- **Runtime:** any browser with variable-font and `font-variation-settings` support (all current evergreen browsers). The effect is purely visual and degrades to plain text everywhere else.
+- **React is optional.** It is declared as an optional peer dependency — install it only if you use the `AxisRhythmText` component or `useAxisRhythm` hook. The vanilla `applyAxisRhythm` / `startAxisRhythm` entry points have no React dependency.
+- **Zero runtime dependencies**, ~4.8 kB gzipped (ESM). `@chenglou/pretext` and `syllable` are optional peers, pulled in only for `lineDetection: 'canvas'` and `source: 'syllable-density'` respectively.
+- **SSR / first paint:** line spans are computed in the browser from measured layout, so server-rendered markup ships as a plain paragraph and the rhythm appears after hydration and `document.fonts.ready`. Expect a brief flash of unstyled (un-rhythmed) text on first load; pair it with `font-display: swap`/`block`. Server-side stable spans are on the roadmap (see [Future improvements](#future-improvements)).
+- **Accessibility:** the effect is skipped entirely when `prefers-reduced-motion: reduce` is set, and line wrapping never alters the DOM text, so screen readers and copy-paste see the original content.
 
 ---
 
@@ -135,4 +167,4 @@ The package itself has zero runtime dependencies. Do not remove this entry.
 
 ---
 
-Current version: 1.1.14
+Current version: 1.1.16

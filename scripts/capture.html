@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Axis Rhythm — capture</title>
+		<style>
+			/* Local variable Merriweather (wght 300–900, wdth 87–112, opsz 7–144).
+			   Loaded from a repo-local copy so the harness is fully reproducible. */
+			@font-face {
+				font-family: "Merriweather VF";
+				src: url("/scripts/fonts/Merriweather.woff2") format("woff2");
+				font-weight: 300 900;
+				font-display: block;
+			}
+
+			/* Transparent page → with Playwright omitBackground, the area outside
+			   each card's border-radius is transparent (no white corners on dark). */
+			* { box-sizing: border-box; }
+			body { margin: 0; background: transparent; }
+			#stage { display: flex; flex-direction: column; gap: 40px; padding: 40px; width: max-content; }
+			.scene {
+				width: 1080px;
+				padding: 44px 52px;
+				border-radius: 16px;
+				font-family: "Merriweather VF", serif;
+			}
+			.col { display: flex; gap: 40px; }
+			.pane { flex: 1; min-width: 0; }
+			/* Hero is a single full-width pane; cap its measure so the heaviest
+			   line never reaches the card edge (linePreservation keeps lines
+			   nowrap, so the widest line drives layout width). */
+			#hero .sample { max-width: 880px; }
+			.lbl {
+				font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+				letter-spacing: 0.14em;
+				text-transform: uppercase;
+				opacity: 0.5;
+				margin-bottom: 16px;
+			}
+			.sample {
+				font-size: 20px;
+				line-height: 1.8;
+				margin: 0;
+				/* Base axes — Axis Rhythm overrides only the cycled axis per line. */
+				font-variation-settings: "wght" 400, "opsz" 20, "wdth" 100;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="stage"></div>
+		<!-- The built bundle statically re-exports the React layer, so the browser
+		     must resolve the bare "react" specifiers even though we only use the
+		     vanilla functions. Stub them with empty modules — never invoked here. -->
+		<script type="importmap">
+			{
+				"imports": {
+					"react": "data:text/javascript,export default {};export const useRef=()=>({});export const useCallback=(f)=>f;export const useLayoutEffect=()=>{};export const useEffect=()=>{};export const forwardRef=(f)=>f;",
+					"react-dom": "data:text/javascript,export default {};",
+					"react/jsx-runtime": "data:text/javascript,export const jsx=()=>null;export const jsxs=()=>null;export const Fragment={};"
+				}
+			}
+		</script>
+		<script type="module">
+			// Mount the real, built package (vanilla entry — no React needed).
+			import { applyAxisRhythm, getCleanHTML } from "/dist/index.js";
+
+			const COPY = `Applied line by line, a variable font axis gives you something CSS cannot: a paragraph with rhythm. Each line carries a different setting, yet the text reads as one. The difference is a texture the eye feels before the mind names it — a quiet landmark on every line.`;
+
+			// One scene per output image (assets/<id>.png).
+			const SCENES = [
+				{
+					id: "hero",
+					bg: "#0e0b16",
+					fg: "#efe9f6",
+					// Single pane: the effect on, weight cycling line to line.
+					panes: [
+						{ cfg: { axis: "wght", values: [620, 320], period: 2, linePreservation: "spacing" } },
+					],
+				},
+				{
+					id: "before-after",
+					bg: "#0e0b16",
+					fg: "#efe9f6",
+					panes: [
+						{ label: "plain CSS (one weight)", cfg: null },
+						{ label: "axis rhythm (wght per line)", cfg: { axis: "wght", values: [640, 300], period: 2, linePreservation: "spacing" } },
+					],
+				},
+			];
+
+			const stage = document.getElementById("stage");
+			for (const scene of SCENES) {
+				const el = document.createElement("div");
+				el.className = "scene";
+				el.id = scene.id;
+				el.style.background = scene.bg;
+				el.style.color = scene.fg;
+
+				const col = document.createElement("div");
+				col.className = "col";
+				el.appendChild(col);
+
+				for (const pane of scene.panes) {
+					const wrap = document.createElement("div");
+					wrap.className = "pane";
+					if (pane.label) {
+						const lbl = document.createElement("div");
+						lbl.className = "lbl";
+						lbl.textContent = pane.label;
+						wrap.appendChild(lbl);
+					}
+					const p = document.createElement("p");
+					p.className = "sample";
+					p.textContent = COPY;
+					wrap.appendChild(p);
+					col.appendChild(wrap);
+					// Stash the element + its options for the post-font-load pass.
+					p.__cfg = pane.cfg;
+				}
+				stage.appendChild(el);
+			}
+
+			// Apply only after the variable font is actually ready, so line
+			// detection measures the real glyph metrics (per the library's own
+			// document.fonts.ready guidance).
+			window.__ready = (async () => {
+				await document.fonts.ready;
+				// Force the face to load by laying out a sample.
+				document.querySelectorAll(".sample").forEach((p) => {
+					const cfg = p.__cfg;
+					if (!cfg) return; // plain-CSS pane stays untouched
+					const original = getCleanHTML(p);
+					applyAxisRhythm(p, original, cfg);
+				});
+			})();
+		</script>
+	</body>
+</html>
