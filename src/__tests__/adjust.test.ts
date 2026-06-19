@@ -146,8 +146,12 @@ describe('axis-rhythm', () => {
 		const el = makeElement(nWords(14))
 		const original = getCleanHTML(el)
 		applyAxisRhythm(el, original, { axis: 'wdth', values: [100, 96], period: 2 })
-		expect(el.innerHTML).toContain('"wdth" 100')
-		expect(el.innerHTML).toContain('"wdth" 96')
+		// Assert via the CSSOM rather than raw innerHTML — happy-dom 20+ HTML-escapes
+		// double quotes (" -> &quot;) when serializing innerHTML, which is serialization
+		// noise; the parsed style values are unaffected.
+		const fvs = [...el.querySelectorAll('.ar-line')].map((l) => (l as HTMLElement).style.fontVariationSettings)
+		expect(fvs).toContain('"wdth" 100')
+		expect(fvs).toContain('"wdth" 96')
 	})
 
 	// 6. align: 'bottom' reverses the cycle — last line gets values[0], second-to-last gets values[1]
