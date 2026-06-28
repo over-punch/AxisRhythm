@@ -9,4 +9,5 @@
 	--foreground-subtle: oklch(0.680 0.0200 28);
 	--foreground-faint: oklch(0.580 0.0160 28); /* hue 0° */
 	--btn-bg: oklch(0.380 0.0867 28);
+	--panel: oklch(0.350 0.0729 28);
 }
