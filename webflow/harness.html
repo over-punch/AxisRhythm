@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- axisRhythm/webflow/harness.html — local proof of the Webflow embed bundle.
+     Serve the axisRhythm repo root (e.g. `python3 -m http.server`) and open
+     /webflow/harness.html after `npm run build:webflow`. The paragraph should
+     render its lines with alternating axis widths (line 1 wide, line 2 narrow,
+     line 3 wide, …) and re-group its lines when the window is resized. -->
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>axisRhythm — Webflow embed harness</title>
+
+	<!-- Roboto Flex: a variable font with a real wdth axis (25–151). Local-test only. -->
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+	<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght,wdth@8..144,100..1000,25..151&display=swap" rel="stylesheet" />
+
+	<style>
+		body {
+			margin: 0;
+			min-height: 100vh;
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
+			gap: 2.5rem;
+			background: #0e0e12;
+			color: #f4f4f6;
+			font-family: 'Roboto Flex', system-ui, sans-serif;
+			padding: 4rem 6vw;
+			box-sizing: border-box;
+		}
+		/* A comfortable measure so the text wraps to several lines — the rhythm needs lines. */
+		.copy {
+			max-width: 34ch;
+			font-size: clamp(1.6rem, 4vw, 2.8rem);
+			line-height: 1.25;
+			font-weight: 400;
+			margin: 0;
+		}
+		p.note { font-size: 0.9rem; opacity: 0.5; max-width: 48ch; line-height: 1.5; }
+		code { background: #1c1c24; padding: 0.1em 0.35em; border-radius: 4px; }
+	</style>
+</head>
+<body>
+	<!-- The whole integration: mark it data-axisrhythm and set the axis + per-line values.
+	     wdth 151 on even lines, wdth 25 on odd lines, cycling every 2 lines. -->
+	<p
+		class="copy"
+		data-axisrhythm
+		data-ar-axis="wdth"
+		data-ar-values="151,25"
+		data-ar-period="2"
+		data-ar-align="top"
+	>Typography is the craft of endowing human language with a durable visual form, so that meaning survives the journey from one mind to another across time and distance.</p>
+
+	<p class="note">
+		Working means adjacent lines visibly alternate letter width — one line wide,
+		the next condensed — and the wrapping re-groups when you resize the window.
+		Add <code>data-ar-animate="true"</code> to turn the static rhythm into a slow
+		ambient wave. Built by <code>npm run build:webflow</code>.
+	</p>
+
+	<!-- The entire distribution surface: one script tag. -->
+	<script src="../dist/axisrhythm.webflow.min.js"></script>
+</body>
+</html>
