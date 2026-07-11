@@ -5,6 +5,7 @@ import ToolDirectory from "@/components/ToolDirectory"
 import { version } from "../../../package.json"
 import { version as siteVersion } from "../../package.json"
 import SiteFooter from "../components/SiteFooter"
+import PortsSection from "../components/PortsSection"
 import { MagnetChar } from "@liiift-studio/magnettype"
 
 export default function Home() {
@@ -146,6 +147,14 @@ const stop = startAxisRhythm(el, original, {
 					<p><strong>update: slow</strong> — on e-ink and slow-refresh displays (Kindle, reMarkable, and similar panels), variable font axis animations produce no visible effect because the panel cannot refresh fast enough to show the transition. Axis Rhythm detects <code className="text-xs font-mono">matchMedia(&apos;(update: slow)&apos;)</code> and returns early, restoring the element to its original HTML without injecting any spans or applying any axis values.</p>
 				</div>
 			</section>
+
+			<PortsSection
+				npm="@liiift-studio/axisrhythm"
+				bundle="axisrhythm"
+				attr="data-axisrhythm"
+				framerComponent="AxisRhythm"
+				repo="Liiift-Studio/AxisRhythm"
+			/>
 
 			<SiteFooter current="axisRhythm" npmVersion={version} siteVersion={siteVersion} />
 
