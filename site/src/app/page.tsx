@@ -151,7 +151,7 @@ const stop = startAxisRhythm(el, original, {
 			<PortsSection
 				npm="@liiift-studio/axisrhythm"
 				bundle="axisrhythm"
-				attr="data-axisrhythm"
+				attr="data-axisrhythm" figma="partial"
 				framerComponent="AxisRhythm"
 				repo="Liiift-Studio/AxisRhythm"
 			/>
