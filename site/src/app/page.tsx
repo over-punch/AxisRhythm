@@ -119,7 +119,7 @@ const stop = startAxisRhythm(el, original, {
 						<table className="w-full text-xs" aria-label="API options">
 							<caption className="sr-only">AxisRhythm API options</caption>
 							<thead><tr className="text-subtle text-left"><th className="pb-2 pr-6 font-normal">Option</th><th className="pb-2 pr-6 font-normal">Default</th><th className="pb-2 font-normal">Description</th></tr></thead>
-							<tbody className="text-muted zebra-bleed">
+							<tbody className="text-muted zebra">
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">axis</td><td className="py-2 pr-6">&apos;wdth&apos;</td><td className="py-2">Variable font axis tag, e.g. &apos;wdth&apos;, &apos;wght&apos;, &apos;opsz&apos;.</td></tr>
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">values</td><td className="py-2 pr-6">[100, 96]</td><td className="py-2">Axis values to cycle through across lines.</td></tr>
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">period</td><td className="py-2 pr-6">2</td><td className="py-2">Lines per cycle.</td></tr>
