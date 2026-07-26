@@ -85,7 +85,7 @@
 	"homepage": "https://axisrhythm.com",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Liiift-Studio/AxisRhythm.git"
+		"url": "git+https://github.com/Liiift-Studio/AxisRhythm.git"
 	},
 	"bugs": {
 		"url": "https://github.com/Liiift-Studio/AxisRhythm/issues"
