@@ -164,7 +164,3 @@ The package itself has zero runtime dependencies. Do not remove this entry.
 - **Multi-axis variation** — cycle more than one axis simultaneously per line (e.g. alternate both `wdth` and `wght` independently)
 - **SSR hydration** — generate stable line spans on the server to eliminate the flash-of-unstyled-text on first paint
 - **Smooth re-layout** — animate axis values on resize instead of snapping, for a less jarring transition when viewport width changes
-
----
-
-Current version: 1.1.17
