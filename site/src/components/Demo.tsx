@@ -2,6 +2,7 @@
 
 // Interactive axis rhythm demo with live controls, cursor/gyro modes, and period slider
 import { useState, useEffect, useDeferredValue, useCallback, memo, useMemo } from "react"
+import { useMediaQuery, useClientValue } from "@/lib/clientValue"
 import { AxisRhythmText } from "@liiift-studio/axisrhythm"
 import type { AxisRhythmOptions } from "@liiift-studio/axisrhythm"
 
@@ -109,15 +110,10 @@ export default function Demo() {
 	const [gyroLow, setGyroLow] = useState<number>(AXIS_CONFIG.wght.defaultLow)
 
 	// Detected capabilities — resolved client-side after mount
-	const [showCursor, setShowCursor] = useState(false)
-	const [showGyro, setShowGyro] = useState(false)
-
-	useEffect(() => {
-		const isHover = window.matchMedia('(hover: hover)').matches
-		const isTouch = window.matchMedia('(hover: none)').matches
-		setShowCursor(isHover)
-		setShowGyro(isTouch && 'DeviceOrientationEvent' in window)
-	}, [])
+	const showCursor = useMediaQuery('(hover: hover)')
+	const isTouch = useMediaQuery('(hover: none)')
+	const hasOrientation = useClientValue(() => 'DeviceOrientationEvent' in window, false)
+	const showGyro = isTouch && hasOrientation
 
 	const cfg = AXIS_CONFIG[axis]
 
@@ -326,7 +322,7 @@ export default function Demo() {
 			)}
 			<div className="relative pb-8">
 				<div className="flex flex-col gap-8">
-					{PARAGRAPHS.map((para, i) => (
+					{PARAGRAPHS.map((para) => (
 						<AxisRhythmText key={para.slice(0, 20)} axis={axis} values={[dValueHigh, dValueLow]} period={dPeriod} align={align} linePreservation={linePreservation} style={sampleStyle}>
 							{para}
 						</AxisRhythmText>
