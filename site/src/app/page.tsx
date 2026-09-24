@@ -14,7 +14,7 @@ export default function Home() {
 			<Hero
 				eyebrow="per-line axis rhythm"
 				title={[{ text: "Per-line axis" }, { text: "alternation.", italic: true, subtle: true }]}
-				install="@liiift-studio/axisrhythm"
+				install="@overpunch/axisrhythm"
 				github="https://github.com/Liiift-Studio/AxisRhythm"
 				tech={["TypeScript", "No required dependencies", "React + Vanilla JS"]}
 			>
@@ -63,7 +63,7 @@ export default function Home() {
 				<div className="flex flex-col gap-8 text-sm">
 					<div className="flex flex-col gap-3">
 						<p className="text-muted">Drop-in component</p>
-						<CodeBlock code={`import { AxisRhythmText } from '@liiift-studio/axisrhythm'
+						<CodeBlock code={`import { AxisRhythmText } from '@overpunch/axisrhythm'
 
 <AxisRhythmText axis="wdth" values={[100, 88]} period={2}>
   Your paragraph text here...
@@ -71,14 +71,14 @@ export default function Home() {
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="text-muted">Hook — attach to any element</p>
-						<CodeBlock code={`import { useAxisRhythm } from '@liiift-studio/axisrhythm'
+						<CodeBlock code={`import { useAxisRhythm } from '@overpunch/axisrhythm'
 
 const ref = useAxisRhythm({ axis: 'wdth', values: [100, 88], period: 2 })
 <p ref={ref}>{children}</p>`} />
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="text-muted">Vanilla JS — static</p>
-						<CodeBlock code={`import { applyAxisRhythm, getCleanHTML } from '@liiift-studio/axisrhythm'
+						<CodeBlock code={`import { applyAxisRhythm, getCleanHTML } from '@overpunch/axisrhythm'
 
 const el = document.querySelector('p')
 const original = getCleanHTML(el)
@@ -86,7 +86,7 @@ applyAxisRhythm(el, original, { axis: 'wdth', values: [100, 88], period: 2 })`} 
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="text-muted">Vanilla JS — animated</p>
-						<CodeBlock code={`import { startAxisRhythm, getCleanHTML } from '@liiift-studio/axisrhythm'
+						<CodeBlock code={`import { startAxisRhythm, getCleanHTML } from '@overpunch/axisrhythm'
 
 const el = document.querySelector('p')
 const original = getCleanHTML(el)
@@ -131,7 +131,7 @@ const stop = startAxisRhythm(el, original, {
 			</section>
 
 			<PortsSection
-				npm="@liiift-studio/axisrhythm"
+				npm="@overpunch/axisrhythm"
 				bundle="axisrhythm"
 				attr="data-axisrhythm" figma="partial"
 				framerComponent="AxisRhythm"

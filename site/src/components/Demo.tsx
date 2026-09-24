@@ -3,8 +3,8 @@
 // Interactive axis rhythm demo with live controls, cursor/gyro modes, and period slider
 import { useState, useEffect, useDeferredValue, useCallback, memo, useMemo } from "react"
 import { useMediaQuery, useClientValue } from "@/lib/clientValue"
-import { AxisRhythmText } from "@liiift-studio/axisrhythm"
-import type { AxisRhythmOptions } from "@liiift-studio/axisrhythm"
+import { AxisRhythmText } from "@overpunch/axisrhythm"
+import type { AxisRhythmOptions } from "@overpunch/axisrhythm"
 
 type LinePreservation = NonNullable<AxisRhythmOptions['linePreservation']>
 
