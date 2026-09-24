@@ -1,12 +1,12 @@
 # Axis Rhythm
 
-[![npm](https://img.shields.io/npm/v/%40liiift-studio%2Faxisrhythm.svg)](https://www.npmjs.com/package/@liiift-studio/axisrhythm) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/Liiift-Studio/type-tools)
+[![npm](https://img.shields.io/npm/v/%40liiift-studio%2Faxisrhythm.svg)](https://www.npmjs.com/package/@overpunch/axisrhythm) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/Liiift-Studio/type-tools)
 
 CSS applies `font-variation-settings` to the whole element — every line gets the same axis value. Axis Rhythm works line by line, cycling any OpenType axis through a sequence of values across paragraph lines. The result is a texture the eye reads as rhythm, not noise. Like column highlighting for text.
 
 ![A paragraph where the font weight axis alternates line by line — odd lines bold, even lines light — yet the text reads as a single block](https://raw.githubusercontent.com/Liiift-Studio/AxisRhythm/main/assets/hero.png?v=1)
 
-**[axisrhythm.com](https://axisrhythm.com)** · [npm](https://www.npmjs.com/package/@liiift-studio/axisrhythm) · [GitHub](https://github.com/Liiift-Studio/AxisRhythm)
+**[axisrhythm.com](https://axisrhythm.com)** · [npm](https://www.npmjs.com/package/@overpunch/axisrhythm) · [GitHub](https://github.com/Liiift-Studio/AxisRhythm)
 
 TypeScript · Zero runtime dependencies · ~4.8 kB gzipped · React optional · Vanilla JS
 
@@ -15,7 +15,7 @@ TypeScript · Zero runtime dependencies · ~4.8 kB gzipped · React optional · 
 ## Install
 
 ```bash
-npm install @liiift-studio/axisrhythm
+npm install @overpunch/axisrhythm
 ```
 
 ---
@@ -47,7 +47,7 @@ Declare the range for whichever axis you cycle (`font-weight` for `wght`, `font-
 ### React component
 
 ```tsx
-import { AxisRhythmText } from '@liiift-studio/axisrhythm'
+import { AxisRhythmText } from '@overpunch/axisrhythm'
 
 <AxisRhythmText axis="wdth" values={[100, 88]} period={2} linePreservation="spacing">
   Your paragraph text here...
@@ -59,7 +59,7 @@ import { AxisRhythmText } from '@liiift-studio/axisrhythm'
 ### React hook
 
 ```tsx
-import { useAxisRhythm } from '@liiift-studio/axisrhythm'
+import { useAxisRhythm } from '@overpunch/axisrhythm'
 
 // Inside a React component:
 const ref = useAxisRhythm({ axis: 'wdth', values: [100, 88], period: 2 })
@@ -71,7 +71,7 @@ The hook re-runs automatically on resize via `ResizeObserver` and after fonts lo
 ### Vanilla JS
 
 ```ts
-import { applyAxisRhythm, startAxisRhythm, removeAxisRhythm, getCleanHTML } from '@liiift-studio/axisrhythm'
+import { applyAxisRhythm, startAxisRhythm, removeAxisRhythm, getCleanHTML } from '@overpunch/axisrhythm'
 
 const el = document.querySelector('p')
 const original = getCleanHTML(el)
@@ -98,7 +98,7 @@ const stop = startAxisRhythm(el, original, { ...opts, animate: true })
 ### TypeScript
 
 ```ts
-import type { AxisRhythmOptions } from '@liiift-studio/axisrhythm'
+import type { AxisRhythmOptions } from '@overpunch/axisrhythm'
 
 const opts: AxisRhythmOptions = { axis: 'wdth', values: [100, 88], period: 2 }
 ```

@@ -12,7 +12,7 @@ import { useEffect, useRef } from "react"
 import { addPropertyControls, ControlType, RenderTarget } from "framer"
 // Pin to a published version so shared instances stay stable. Bump when the core changes.
 // The core is framework-agnostic (operates on a DOM element), so no React externalisation is needed.
-import { applyAxisRhythm, startAxisRhythm, getCleanHTML } from "https://esm.sh/@liiift-studio/axisrhythm@1.1.18"
+import { applyAxisRhythm, startAxisRhythm, getCleanHTML } from "https://esm.sh/@overpunch/axisrhythm@1.1.18"
 
 /** Props surfaced to the Framer UI via addPropertyControls, plus base text styling.
  *  Option fields are declared explicitly so the component needs no type import over HTTP.
