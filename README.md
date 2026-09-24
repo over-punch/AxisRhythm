@@ -1,12 +1,12 @@
 # Axis Rhythm
 
-[![npm](https://img.shields.io/npm/v/%40liiift-studio%2Faxisrhythm.svg)](https://www.npmjs.com/package/@overpunch/axisrhythm) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/Liiift-Studio/type-tools)
+[![npm](https://img.shields.io/npm/v/%40overpunch%2Faxisrhythm.svg)](https://www.npmjs.com/package/@overpunch/axisrhythm) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/over-punch/type-tools)
 
 CSS applies `font-variation-settings` to the whole element — every line gets the same axis value. Axis Rhythm works line by line, cycling any OpenType axis through a sequence of values across paragraph lines. The result is a texture the eye reads as rhythm, not noise. Like column highlighting for text.
 
-![A paragraph where the font weight axis alternates line by line — odd lines bold, even lines light — yet the text reads as a single block](https://raw.githubusercontent.com/Liiift-Studio/AxisRhythm/main/assets/hero.png?v=1)
+![A paragraph where the font weight axis alternates line by line — odd lines bold, even lines light — yet the text reads as a single block](https://raw.githubusercontent.com/over-punch/AxisRhythm/main/assets/hero.png?v=1)
 
-**[axisrhythm.com](https://axisrhythm.com)** · [npm](https://www.npmjs.com/package/@overpunch/axisrhythm) · [GitHub](https://github.com/Liiift-Studio/AxisRhythm)
+**[axisrhythm.com](https://axisrhythm.com)** · [npm](https://www.npmjs.com/package/@overpunch/axisrhythm) · [GitHub](https://github.com/over-punch/AxisRhythm)
 
 TypeScript · Zero runtime dependencies · ~4.8 kB gzipped · React optional · Vanilla JS
 
@@ -127,7 +127,7 @@ const opts: AxisRhythmOptions = { axis: 'wdth', values: [100, 88], period: 2 }
 
 ## How it works
 
-![Side by side: the same paragraph set in plain CSS at one weight, versus Axis Rhythm cycling the weight axis line by line — both read as a single block, but the right pane carries a per-line texture](https://raw.githubusercontent.com/Liiift-Studio/AxisRhythm/main/assets/before-after.png?v=1)
+![Side by side: the same paragraph set in plain CSS at one weight, versus Axis Rhythm cycling the weight axis line by line — both read as a single block, but the right pane carries a per-line texture](https://raw.githubusercontent.com/over-punch/AxisRhythm/main/assets/before-after.png?v=1)
 
 The algorithm detects visual lines by measuring word span positions with `getBoundingClientRect()`, then wraps each line in a `<span>` with its own `font-variation-settings`. The injected value overrides only the target axis — all other axes set on the parent element are preserved by reading and patching the computed `fontVariationSettings` string before writing. Runs on mount and on every resize via `ResizeObserver`. Re-runs when fonts finish loading (`document.fonts.ready`). The effect is skipped entirely if `prefers-reduced-motion: reduce` is set.
 

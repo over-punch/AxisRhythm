@@ -15,7 +15,7 @@ export default function Home() {
 				eyebrow="per-line axis rhythm"
 				title={[{ text: "Per-line axis" }, { text: "alternation.", italic: true, subtle: true }]}
 				install="@overpunch/axisrhythm"
-				github="https://github.com/Liiift-Studio/AxisRhythm"
+				github="https://github.com/over-punch/AxisRhythm"
 				tech={["TypeScript", "No required dependencies", "React + Vanilla JS"]}
 			>
 				<p className="text-base leading-relaxed max-w-lg">
@@ -135,7 +135,7 @@ const stop = startAxisRhythm(el, original, {
 				bundle="axisrhythm"
 				attr="data-axisrhythm" figma="partial"
 				framerComponent="AxisRhythm"
-				repo="Liiift-Studio/AxisRhythm"
+				repo="over-punch/AxisRhythm"
 			/>
 
 			<SiteFooter current="axisRhythm" npmVersion={version} siteVersion={siteVersion} />
