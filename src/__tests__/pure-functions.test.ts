@@ -434,3 +434,25 @@ describe('letter-spacing preservation keeps the author tracking', () => {
 		expect(ls.startsWith('calc(2px')).toBe(true)
 	})
 })
+
+describe('line grouping with overlapping glyph boxes', () => {
+	afterEach(() => { vi.restoreAllMocks() })
+
+	it('keeps lines apart when word boxes are taller than the line pitch (line-height: 1)', () => {
+		document.body.innerHTML = ''
+		let idx = 0
+		// 7 words per line, lines 20px apart, but each word box is 30px tall (overlapping the next line,
+		// as fonts with tall ascenders and descenders do at line-height: 1)
+		vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+			const el = this as HTMLElement
+			if (el.classList?.contains(AXIS_RHYTHM_CLASSES.word)) {
+				const top = Math.floor(idx++ / 7) * 20
+				return { width: 80, top, left: 0, bottom: top + 30, right: 80, height: 30, x: 0, y: top, toJSON: () => {} } as DOMRect
+			}
+			return { width: 600, top: 0, left: 0, bottom: 20, right: 600, height: 20, x: 0, y: 0, toJSON: () => {} } as DOMRect
+		})
+		const el = makeElement(nWords(14))
+		applyAxisRhythm(el, getCleanHTML(el), { values: [100, 90] })
+		expect(el.querySelectorAll(`.${AXIS_RHYTHM_CLASSES.line}`).length).toBe(2)
+	})
+})

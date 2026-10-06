@@ -255,6 +255,33 @@ interface ItemMeta {
 	atomic?: boolean
 }
 
+/**
+ * Splits a text node the browser lays out over several lines into one string per line, by
+ * measuring where each character's box starts a new line. Used only for the rare word that wraps.
+ */
+function splitAtLineBreaks(node: Text, text: string): string[] {
+	const pieces: string[] = []
+	const range = document.createRange()
+	let start = 0
+	let bottom = NaN
+	for (let i = 0; i < text.length; i++) {
+		range.setStart(node, i)
+		range.setEnd(node, i + 1)
+		const rect = range.getClientRects()[0]
+		if (!rect) continue
+		if (Number.isNaN(bottom)) { bottom = rect.bottom; continue }
+		if ((rect.top + rect.bottom) / 2 > bottom) {
+			pieces.push(text.slice(start, i))
+			start = i
+			bottom = rect.bottom
+		} else {
+			bottom = Math.max(bottom, rect.bottom)
+		}
+	}
+	pieces.push(text.slice(start))
+	return pieces.filter((p) => p.length > 0)
+}
+
 /** Elements kept whole during the rebuild (no text of their own to split). */
 const ATOMIC_TAGS = new Set(['IMG', 'SVG', 'INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'VIDEO', 'AUDIO', 'CANVAS', 'IFRAME', 'OBJECT', 'MATH'])
 
@@ -281,6 +308,10 @@ function splitUnspaced(token: string): string[] {
  * @param el - Element that may contain axis-rhythm markup
  */
 export function getCleanHTML(el: HTMLElement): string {
+	// An element this library processed returns the exact snapshot it was built from (an element that
+	// wrapped across lines was rebuilt as one copy per line, which unwrapping can't merge back).
+	const original = originals.get(el)
+	if (original !== undefined && el.querySelector(`.${AXIS_RHYTHM_CLASSES.line}`)) return original
 	const clone = el.cloneNode(true) as HTMLElement
 	// Remove all injected line and word spans by unwrapping their children in place.
 	// Query for both old data-attribute pattern and current class-based pattern.
@@ -368,6 +399,7 @@ export function applyAxisRhythm(
 
 	// --- Pass 1: Reset ---
 	element.innerHTML = originalHTML
+	originals.set(element, originalHTML)
 
 	// --- Pass 2: Word wrap ---
 	// Each word goes in a plain inline span (.ar-word) holding only the word; the whitespace around it
@@ -503,15 +535,42 @@ export function applyAxisRhythm(
 		// Words stay inline (no forced inline-block), so this reads the real layout. A word starts a
 		// new line when its box begins at or below the bottom of the current line; a superscript or
 		// a larger inline image on the same line overlaps it and stays in the line.
+		// A word the browser itself breaks across lines (after a hyphen, or with overflow-wrap) is split
+		// into one span per line at that break, which is already a break, so layout doesn't change.
+		for (let i = 0; i < wordSpans.length; i++) {
+			const span = wordSpans[i]
+			if (meta.get(span)?.atomic) continue
+			const rects = span.getClientRects?.()
+			if (!rects || rects.length < 2 || span.firstChild?.nodeType !== Node.TEXT_NODE) continue
+			const pieces = splitAtLineBreaks(span.firstChild as Text, span.textContent ?? '')
+			if (pieces.length < 2) continue
+			span.textContent = pieces[0]
+			let prev = span
+			for (const piece of pieces.slice(1)) {
+				const next = document.createElement('span')
+				next.className = span.className
+				next.style.hyphens = 'manual'
+				next.textContent = piece
+				prev.after(next)
+				meta.set(next, { lead: '', breakBefore: null })
+				wordSpans.splice(++i, 0, next)
+				prev = next
+			}
+		}
+
+		// A word starts a new line when its vertical middle is below the bottom of the current line's
+		// boxes. Comparing middles, not tops, keeps a superscript or a taller inline image in its line,
+		// and still separates lines whose glyph boxes overlap (a tight line-height, or fonts with tall
+		// ascenders and descenders). Comparing tops merged every line into one at line-height: 1.
 		let currentGroup: LineGroup | null = null
 		let groupBottom = -Infinity
 		for (const span of wordSpans) {
 			const rects = span.getClientRects?.()
 			const rect = rects && rects.length ? rects[0] : span.getBoundingClientRect()
-			const top = Math.round(rect.top)
-			const bottom = Math.round(rect.bottom ?? rect.top)
-			if (currentGroup === null || (top !== currentGroup.top && top >= groupBottom - 1)) {
-				currentGroup = { spans: [], top }
+			const top = rect.top
+			const bottom = rect.bottom ?? rect.top
+			if (currentGroup === null || (top + bottom) / 2 > groupBottom) {
+				currentGroup = { spans: [], top: Math.round(top) }
 				lineGroups.push(currentGroup)
 				groupBottom = bottom
 			} else {
@@ -725,7 +784,11 @@ function authorLetterSpacing(el: HTMLElement): string {
  */
 export function removeAxisRhythm(element: HTMLElement, originalHTML: string): void {
 	element.innerHTML = originalHTML
+	originals.delete(element)
 }
+
+/** The snapshot each processed element was built from, returned by getCleanHTML. */
+const originals = new WeakMap<HTMLElement, string>()
 
 /**
  * Start a continuous animated axis-rhythm wave on an element.
