@@ -131,21 +131,26 @@ const opts: AxisRhythmOptions = { axis: 'wdth', values: [100, 88], period: 2 }
 
 The algorithm detects visual lines by measuring word span positions with `getBoundingClientRect()`, then wraps each line in a `<span>` with its own `font-variation-settings`. The injected value overrides only the target axis — all other axes set on the parent element are preserved by reading and patching the computed `fontVariationSettings` string before writing. Runs on mount and on every resize via `ResizeObserver`. Re-runs when fonts finish loading (`document.fonts.ready`). The effect is skipped entirely if `prefers-reduced-motion: reduce` is set.
 
-**Line break safety:** Each run starts from the original HTML, detects lines at the element's natural layout, then locks them with `white-space: nowrap`. Word breaks never change as a result of the axis variation.
+**Line break safety:** Each run starts from the original HTML, detects lines at the element's natural layout (words are measured inline, with the spaces between them left in the text flow), then locks them with `white-space: nowrap`. The axis variation doesn't move line breaks. Text without spaces between words (Chinese, Japanese, Korean, Thai) breaks between characters, as it does in normal layout.
+
+**Limits:** breaks inside a word don't survive the lock. A word that only fits because of `hyphens: auto` or `overflow-wrap: anywhere` (a long URL, say) stays whole on one line and can overflow the container; automatic hyphenation is turned off while lines are measured so the locked lines match. If the web font hasn't loaded when the effect runs, the lines are measured in the fallback font; the React hook and the Webflow embed wait for `document.fonts.ready`, and vanilla callers should too.
+
+**Markup:** inline elements (`<em>`, `<a>`, `<strong>`…) are kept. An element that runs across a line break is split into one copy per line (a link over two lines becomes two links to the same place), and only the first copy keeps its `id`. Your own `<br>` tags are kept; `getCleanHTML()` returns the original markup.
 
 **Width overflow:** Applying different axis values per line alters character widths, so lines may grow wider or narrower than the container. `linePreservation: 'none'` (default) is appropriate for display or headline type where the axis range is large and overflow is intentional. For body text — or any context where line edges must stay flush — use `linePreservation: 'spacing'` (adjusts letter-spacing to compensate) or `'scale'` (GPU scaleX transform).
 
-The `linePreservation` pass measures each line's natural width before applying the axis value, then applies axis and measures again. The delta becomes either a letter-spacing correction (`'spacing'`) or a `scaleX` transform (`'scale'`) per line.
+The `linePreservation` pass measures each line's natural width before applying the axis value, then applies axis and measures again. The delta becomes either a letter-spacing correction (`'spacing'`, added on top of any letter-spacing you've set) or a `scaleX` transform (`'scale'`) per line. While animating, each line is measured once at the lowest and highest axis values and the correction is interpolated per frame.
 
 ---
 
 ## Requirements & rendering
 
 - **Runtime:** any browser with variable-font and `font-variation-settings` support (all current evergreen browsers). The effect is purely visual and degrades to plain text everywhere else.
-- **React is optional.** It is declared as an optional peer dependency — install it only if you use the `AxisRhythmText` component or `useAxisRhythm` hook. The vanilla `applyAxisRhythm` / `startAxisRhythm` entry points have no React dependency.
+- **React is optional.** It is an optional peer dependency, needed only for the `AxisRhythmText` component and `useAxisRhythm` hook. The main entry point also exports those, so it imports `react`; without React installed, import the vanilla API from the React-free subpath: `import { applyAxisRhythm } from '@overpunch/axisrhythm/core'`.
 - **Zero runtime dependencies**, ~4.8 kB gzipped (ESM). `@chenglou/pretext` and `syllable` are optional peers, pulled in only for `lineDetection: 'canvas'` and `source: 'syllable-density'` respectively.
 - **SSR / first paint:** line spans are computed in the browser from measured layout, so server-rendered markup ships as a plain paragraph and the rhythm appears after hydration and `document.fonts.ready`. Expect a brief flash of unstyled (un-rhythmed) text on first load; pair it with `font-display: swap`/`block`. Server-side stable spans are on the roadmap (see [Future improvements](#future-improvements)).
-- **Accessibility:** the effect is skipped entirely when `prefers-reduced-motion: reduce` is set, and line wrapping never alters the DOM text, so screen readers and copy-paste see the original content.
+- **Accessibility:** the effect is skipped entirely when `prefers-reduced-motion: reduce` is set. Line wrapping keeps the text, including its spaces, so copy-paste and screen readers get the original words; injected line breaks are `aria-hidden`. A link that wraps is split into one link per line (see **Markup** above).
+- **Webflow embed:** `source: 'syllable-density'` and `lineDetection: 'canvas'` need the optional npm packages, which the script-tag embed can't load; it falls back to `'fixed'` and browser line detection.
 
 ---
 
