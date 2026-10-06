@@ -291,17 +291,16 @@ describe('axis-rhythm', () => {
 		expect(lines.length).toBe(1)
 	})
 
-	// 20. prefers-reduced-motion: applyAxisRhythm restores originalHTML and injects no markup
-	it('prefers-reduced-motion: restores originalHTML and injects no line spans', () => {
+	// 20. prefers-reduced-motion: the static per-line texture isn't motion, so applyAxisRhythm still applies it
+	it('prefers-reduced-motion: the static texture is still applied', () => {
 		const el = makeElement(nWords(14))
 		const original = getCleanHTML(el)
-		vi.spyOn(window, 'matchMedia').mockReturnValue({
-			matches: true, media: '', onchange: null, addListener: () => {}, removeListener: () => {},
+		vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+			matches: q.includes('prefers-reduced-motion'), media: q, onchange: null, addListener: () => {}, removeListener: () => {},
 			addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true,
-		} as MediaQueryList)
+		}) as MediaQueryList)
 		applyAxisRhythm(el, original, { axis: 'wdth', values: [100, 96], period: 2 })
-		expect(el.innerHTML).toBe(original)
-		expect(el.querySelectorAll(`.${AXIS_RHYTHM_CLASSES.line}`).length).toBe(0)
+		expect(el.querySelectorAll(`.${AXIS_RHYTHM_CLASSES.line}`).length).toBeGreaterThan(0)
 		vi.restoreAllMocks()
 	})
 

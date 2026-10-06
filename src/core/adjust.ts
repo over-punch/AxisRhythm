@@ -354,13 +354,6 @@ export function applyAxisRhythm(
 ): void {
 	if (typeof window === 'undefined') return
 
-	// The axis alternation is a decorative typographic effect — skip it entirely
-	// when the user has requested reduced motion.
-	if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
-		element.innerHTML = originalHTML
-		return
-	}
-
 	// On e-ink / slow-update displays the variable font axis animation produces no
 	// visible effect — the panel cannot refresh fast enough to show transitions.
 	// Skip all animation work and restore the element to its clean state.
@@ -398,6 +391,7 @@ export function applyAxisRhythm(
 	if (source === 'syllable-density') reapplyWhenLoaded(tryLoadSyllable(), () => _syllable !== null)
 
 	// --- Pass 1: Reset ---
+	restoreWrap(element)
 	element.innerHTML = originalHTML
 	originals.set(element, originalHTML)
 
@@ -629,84 +623,14 @@ export function applyAxisRhythm(
 	}
 
 	// Computed axis value per line (stored for use in Pass 5).
-	const lineAxisValues: number[] = []
-	// Elements already copied into an earlier line (their later copies drop the id).
-	const copied = new Set<Element>()
-	const lineElements: HTMLElement[] = []
+	const lineAxisValues: number[] = lineGroups.map((group, lineIndex) => densityAxisValues !== null
+		? densityAxisValues[lineIndex]
+		: values[(align === 'bottom' ? (totalLines - 1 - lineIndex) % period : lineIndex % period) % values.length])
 
-	lineGroups.forEach((group, lineIndex) => {
-		const axisValue = densityAxisValues !== null
-			? densityAxisValues[lineIndex]
-			: (() => {
-				const cyclePos = align === 'bottom'
-					? (totalLines - 1 - lineIndex) % period
-					: lineIndex % period
-				return values[cyclePos % values.length]
-			})()
-		lineAxisValues.push(axisValue)
-
-		// Create the line wrapper span — no fontVariationSettings yet.
-		const lineSpan = document.createElement('span')
-		lineSpan.className = AXIS_RHYTHM_CLASSES.line
-		lineSpan.style.display = 'inline-block'
-		lineSpan.style.whiteSpace = 'nowrap'
-
-		// Rebuild the line's text inside copies of its inline ancestors. Consecutive words that share
-		// an ancestor share one copy (one link stays one link within a line); an element that continues
-		// onto a later line is copied again there, without its id so ids stay unique.
-		let openChain: { source: Element; clone: Element }[] = []
-		group.spans.forEach((item, k) => {
-			const info = meta.get(item)
-			const ancestors: Element[] = []
-			let node: Element | null = item.parentElement
-			while (node && node !== element) {
-				ancestors.unshift(node)
-				node = node.parentElement
-			}
-			let shared = 0
-			while (shared < openChain.length && shared < ancestors.length && openChain[shared].source === ancestors[shared]) shared++
-			openChain = openChain.slice(0, shared)
-			let parent: Node = shared ? openChain[shared - 1].clone : lineSpan
-			// The space before a word sits outside any element the word's predecessor closed. It is kept at
-			// the start of a line too: invisible there (collapsed), but the text and copy-paste keep it.
-			const lead = info?.lead ?? ''
-			void k
-			if (lead) parent.appendChild(document.createTextNode(lead))
-			for (let a = shared; a < ancestors.length; a++) {
-				const copy = ancestors[a].cloneNode(false) as Element
-				if (copied.has(ancestors[a])) copy.removeAttribute('id')
-				copied.add(ancestors[a])
-				parent.appendChild(copy)
-				openChain.push({ source: ancestors[a], clone: copy })
-				parent = copy
-			}
-			parent.appendChild(info?.atomic ? item.cloneNode(true) : document.createTextNode(item.textContent ?? ''))
-		})
-
-		lineElements.push(lineSpan)
-	})
-
-	// Insert line spans into the live DOM, separated by <br>.
-	// Spans are now measurable but inherit axis values from the parent element.
-	element.innerHTML = ''
-
-	lineElements.forEach((lineEl, i) => {
-		element.appendChild(lineEl)
-		if (i < lineElements.length - 1) {
-			// The author's own <br> at this boundary is kept (getCleanHTML returns it); otherwise an
-			// injected, aria-hidden break that getCleanHTML removes.
-			const authorBreak = meta.get(lineGroups[i + 1].spans[0])?.breakBefore
-			if (authorBreak) {
-				element.appendChild(authorBreak.cloneNode(false))
-			} else {
-				const br = document.createElement('br')
-				br.setAttribute('data-ar-break', '')
-				// Hide from screen readers — purely presentational line break
-				br.setAttribute('aria-hidden', 'true')
-				element.appendChild(br)
-			}
-		}
-	})
+	/** Each line's styled runs: one box per line in 'scale' mode, else one inline run per element the line passes through. */
+	const lines: HTMLElement[][] = linePreservation === 'scale'
+		? buildLineBoxes(element, lineGroups, meta)
+		: buildLineRuns(element, lineGroups, meta)
 
 	// --- Pass 5: Apply axis values + optional line-length preservation ---
 	// Read the element's full font-variation-settings once so we can override only
@@ -714,46 +638,39 @@ export function applyAxisRhythm(
 	// Setting just `'wght' 700` on a span would drop the parent's `opsz 18` entirely,
 	// making axis-width measurements inconsistent with natural-width measurements.
 	const baseFVS = getComputedStyle(element).fontVariationSettings
+	const setAxis = (i: number) => lines[i].forEach((run) => { run.style.fontVariationSettings = overrideAxis(baseFVS, axis, lineAxisValues[i]) })
 
 	if (linePreservation === 'none') {
 		// Simple path: apply axis variation directly, preserving parent axes.
-		lineElements.forEach((el, i) => {
-			el.style.fontVariationSettings = overrideAxis(baseFVS, axis, lineAxisValues[i])
-		})
+		lines.forEach((_, i) => setAxis(i))
 	} else {
 		// Preservation path: measure natural widths before applying axis values,
 		// then apply compensation (letter-spacing or scaleX) to keep line lengths stable.
 
-		// Batch read 1: natural widths (spans inherit parent's fontVariationSettings).
-		const naturalWidths = lineElements.map(el => el.getBoundingClientRect().width)
-
-		// Apply axis values to all spans, preserving all other parent axes.
-		lineElements.forEach((el, i) => {
-			el.style.fontVariationSettings = overrideAxis(baseFVS, axis, lineAxisValues[i])
-		})
-
+		// Batch read 1: natural widths (runs inherit parent's fontVariationSettings).
+		const naturalWidths = lines.map(lineWidth)
+		// Apply axis values to all runs, preserving all other parent axes.
+		lines.forEach((_, i) => setAxis(i))
 		// Batch read 2: widths after axis application.
-		const axisWidths = lineElements.map(el => el.getBoundingClientRect().width)
+		const axisWidths = lines.map(lineWidth)
 
 		if (linePreservation === 'spacing') {
 			// Adjust letter-spacing per line so the total advance width matches
 			// the natural (un-modified) width. Same technique as HoverBoldly.
 			// Added on top of the author's own letter-spacing, which the line would otherwise lose.
 			const baseSpacing = authorLetterSpacing(element)
-			lineElements.forEach((el, i) => {
+			lines.forEach((runs, i) => {
 				const delta = naturalWidths[i] - axisWidths[i]
-				const charCount = [...(el.textContent ?? '')].length
-				if (charCount > 0) {
-					const fontSize = parseFloat(getComputedStyle(el).fontSize)
-					el.style.letterSpacing = fontSize > 0
-						? `calc(${baseSpacing} + ${(delta / charCount) / fontSize}em)`
-						: ''
-				}
+				const charCount = lineChars(runs)
+				const fontSize = parseFloat(getComputedStyle(runs[0]).fontSize)
+				if (charCount > 0) runs.forEach((run) => {
+					run.style.letterSpacing = fontSize > 0 ? `calc(${baseSpacing} + ${(delta / charCount) / fontSize}em)` : ''
+				})
 			})
-		} else if (linePreservation === 'scale') {
+		} else {
 			// Apply a scaleX transform so each line visually occupies its natural width. The box keeps
 			// its own width (scaling a box already widened to the natural width would scale it twice).
-			lineElements.forEach((el, i) => {
+			lines.forEach(([el], i) => {
 				if (axisWidths[i] > 0 && naturalWidths[i] > 0) {
 					el.style.transform = `scaleX(${(naturalWidths[i] / axisWidths[i]).toFixed(6)})`
 					el.style.transformOrigin = 'left center'
@@ -776,6 +693,172 @@ function authorLetterSpacing(el: HTMLElement): string {
 	return !ls || ls === 'normal' ? '0px' : ls
 }
 
+/** The rendered width of a line: the sum of its runs (each run sits on one line). */
+function lineWidth(runs: HTMLElement[]): number {
+	return runs.reduce((sum, run) => sum + run.getBoundingClientRect().width, 0)
+}
+
+/** How many characters a line holds, across its runs. */
+function lineChars(runs: HTMLElement[]): number {
+	return runs.reduce((sum, run) => sum + [...(run.textContent ?? '')].length, 0)
+}
+
+/** The element's inline wrapping styles before axisRhythm locked its lines, restored on reset and remove. */
+const savedWrap = new WeakMap<HTMLElement, { textWrapMode: string; whiteSpace: string }>()
+
+/** Put back the element's own inline wrapping styles, if axisRhythm changed them. */
+function restoreWrap(element: HTMLElement): void {
+	const saved = savedWrap.get(element)
+	if (!saved) return
+	element.style.setProperty('text-wrap-mode', saved.textWrapMode)
+	element.style.whiteSpace = saved.whiteSpace
+	savedWrap.delete(element)
+}
+
+/**
+ * Lock the element's lines in place: no wrapping except at the line breaks axisRhythm inserted. Uses
+ * text-wrap-mode, which keeps the author's white-space handling; older browsers get white-space: nowrap
+ * when the text uses normal white-space.
+ */
+function lockWrap(element: HTMLElement): void {
+	if (!savedWrap.has(element)) savedWrap.set(element, { textWrapMode: element.style.getPropertyValue('text-wrap-mode'), whiteSpace: element.style.whiteSpace })
+	if (typeof CSS !== 'undefined' && CSS.supports?.('text-wrap-mode', 'nowrap')) element.style.setProperty('text-wrap-mode', 'nowrap')
+	else if (getComputedStyle(element).whiteSpace === 'normal') element.style.whiteSpace = 'nowrap'
+}
+
+/**
+ * Style each line in place: its words are grouped into inline `.ar-line` runs (one per element the line
+ * passes through, all sharing `data-ar-line`), and a `<br>` is placed at the start of each line, inside
+ * whatever element continues across the break. The author's markup is kept as it is, so a link that
+ * wraps stays one link. Returns each line's runs.
+ */
+function buildLineRuns(element: HTMLElement, lineGroups: { spans: HTMLElement[] }[], meta: WeakMap<Element, ItemMeta>): HTMLElement[][] {
+	const lines = lineGroups.map((group, lineIndex) => {
+		const runs: HTMLElement[] = []
+		let run: HTMLElement | null = null
+		for (const item of group.spans) {
+			let joinable = run !== null && run.parentNode === item.parentNode
+			if (joinable) {
+				// Only whitespace may sit between the run and this word.
+				for (let n = run!.nextSibling; n && n !== item; n = n.nextSibling) {
+					if (n.nodeType !== Node.TEXT_NODE) { joinable = false; break }
+				}
+			}
+			if (joinable) {
+				while (run!.nextSibling && run!.nextSibling !== item) run!.appendChild(run!.nextSibling)
+				run!.appendChild(item)
+			} else {
+				run = document.createElement('span')
+				run.className = AXIS_RHYTHM_CLASSES.line
+				run.setAttribute('data-ar-line', String(lineIndex))
+				item.parentNode!.insertBefore(run, item)
+				run.appendChild(item)
+				runs.push(run)
+			}
+		}
+		return runs
+	})
+
+	// A break at the start of every line after the first (the author's own <br> there is kept).
+	lines.forEach((runs, i) => {
+		if (i === 0 || !runs.length) return
+		if (meta.get(lineGroups[i].spans[0])?.breakBefore) return
+		// Climb out of elements that start on this line, so the break sits before them.
+		let at: Node = runs[0]
+		while (at.parentNode && at.parentNode !== element && firstContent(at.parentNode) === at) at = at.parentNode
+		// Not aria-hidden: the space before a forced break collapses, so the break is what keeps the words on
+		// either side apart in accessible names ("a long link" across two lines, not "a longlink").
+		const br = document.createElement('br')
+		br.setAttribute('data-ar-break', '')
+		at.parentNode!.insertBefore(br, at)
+	})
+
+	// The word spans were for measuring: put their text back as plain text inside the runs.
+	for (const group of lineGroups) {
+		for (const item of group.spans) {
+			if (meta.get(item)?.atomic || !item.parentNode) continue
+			item.replaceWith(document.createTextNode(item.textContent ?? ''))
+		}
+	}
+	lines.flat().forEach((run) => run.normalize())
+	lockWrap(element)
+	return lines
+}
+
+/** The first child of a node that isn't whitespace-only text. */
+function firstContent(parent: Node): Node | null {
+	for (let n = parent.firstChild; n; n = n.nextSibling) {
+		if (n.nodeType !== Node.TEXT_NODE || (n.textContent ?? '').trim()) return n
+	}
+	return null
+}
+
+/**
+ * 'scale' mode: rebuild each line as its own inline-block `.ar-line` box (a transform needs one box per
+ * line). The line's text is rebuilt inside copies of its inline ancestors; an element that continues onto
+ * a later line is copied again there, without its id. Returns each line as a one-box array.
+ */
+function buildLineBoxes(element: HTMLElement, lineGroups: { spans: HTMLElement[] }[], meta: WeakMap<Element, ItemMeta>): HTMLElement[][] {
+	// Elements already copied into an earlier line (their later copies drop the id).
+	const copied = new Set<Element>()
+	const lineElements = lineGroups.map((group, lineIndex) => {
+		const lineSpan = document.createElement('span')
+		lineSpan.className = AXIS_RHYTHM_CLASSES.line
+		lineSpan.setAttribute('data-ar-line', String(lineIndex))
+		lineSpan.style.display = 'inline-block'
+		lineSpan.style.whiteSpace = 'nowrap'
+		// Consecutive words that share an ancestor share one copy (one link stays one link within a line).
+		let openChain: { source: Element; clone: Element }[] = []
+		group.spans.forEach((item) => {
+			const info = meta.get(item)
+			const ancestors: Element[] = []
+			let node: Element | null = item.parentElement
+			while (node && node !== element) {
+				ancestors.unshift(node)
+				node = node.parentElement
+			}
+			let shared = 0
+			while (shared < openChain.length && shared < ancestors.length && openChain[shared].source === ancestors[shared]) shared++
+			openChain = openChain.slice(0, shared)
+			let parent: Node = shared ? openChain[shared - 1].clone : lineSpan
+			// The space before a word sits outside any element the word's predecessor closed. It is kept at
+			// the start of a line too: invisible there (collapsed), but the text and copy-paste keep it.
+			const lead = info?.lead ?? ''
+			if (lead) parent.appendChild(document.createTextNode(lead))
+			for (let a = shared; a < ancestors.length; a++) {
+				const copy = ancestors[a].cloneNode(false) as Element
+				if (copied.has(ancestors[a])) copy.removeAttribute('id')
+				copied.add(ancestors[a])
+				parent.appendChild(copy)
+				openChain.push({ source: ancestors[a], clone: copy })
+				parent = copy
+			}
+			parent.appendChild(info?.atomic ? item.cloneNode(true) : document.createTextNode(item.textContent ?? ''))
+		})
+		return lineSpan
+	})
+
+	// Insert line boxes into the live DOM, separated by <br>.
+	element.innerHTML = ''
+	lineElements.forEach((lineEl, i) => {
+		element.appendChild(lineEl)
+		if (i < lineElements.length - 1) {
+			// The author's own <br> at this boundary is kept (getCleanHTML returns it); otherwise an
+			// injected, aria-hidden break that getCleanHTML removes.
+			const authorBreak = meta.get(lineGroups[i + 1].spans[0])?.breakBefore
+			if (authorBreak) {
+				element.appendChild(authorBreak.cloneNode(false))
+			} else {
+				const br = document.createElement('br')
+				br.setAttribute('data-ar-break', '')
+				br.setAttribute('aria-hidden', 'true')
+				element.appendChild(br)
+			}
+		}
+	})
+	return lineElements.map((el) => [el])
+}
+
 /**
  * Remove axis-rhythm markup and restore the element to its original HTML.
  *
@@ -783,6 +866,7 @@ function authorLetterSpacing(el: HTMLElement): string {
  * @param originalHTML - The snapshot passed to the original applyAxisRhythm call
  */
 export function removeAxisRhythm(element: HTMLElement, originalHTML: string): void {
+	restoreWrap(element)
 	element.innerHTML = originalHTML
 	originals.delete(element)
 }
@@ -812,15 +896,12 @@ export function startAxisRhythm(
 ): () => void {
 	if (typeof window === 'undefined') return () => {}
 
-	// Respect reduced-motion: skip the animation entirely and return a no-op stop
-	// function so the caller still gets a valid cleanup handle.
-	if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
-		element.innerHTML = originalHTML
-		return () => {}
-	}
-
-	// Build the .ar-line DOM structure (static, no animated options needed).
+	// Build the .ar-line DOM structure: the static per-line texture, which isn't motion.
 	applyAxisRhythm(element, originalHTML, options)
+
+	// Reduced motion: keep the static texture and don't animate it.
+	const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+	if (motionQuery?.matches) return () => {}
 
 	const { axis, values, period } = sanitizeOptions(options)
 	const linePreservation = options.linePreservation ?? DEFAULTS.linePreservation
@@ -855,9 +936,13 @@ export function startAxisRhythm(
 	}
 
 	const baseFVS     = getComputedStyle(element).fontVariationSettings
-	const lineElements = Array.from(
-		element.querySelectorAll<HTMLElement>(`.${AXIS_RHYTHM_CLASSES.line}`),
-	)
+	// Each line's runs (a line that passes through a link or <em> has one run per element), by data-ar-line.
+	const lineRuns: HTMLElement[][] = []
+	element.querySelectorAll<HTMLElement>(`.${AXIS_RHYTHM_CLASSES.line}`).forEach((run) => {
+		const i = Number(run.getAttribute('data-ar-line')) || 0
+		;(lineRuns[i] ??= []).push(run)
+	})
+	const lines = lineRuns.filter(Boolean)
 
 	// Line-length preservation while animating: measure each line once at its natural width and at the
 	// lowest and highest axis values, then compensate every frame by interpolating between them
@@ -866,26 +951,29 @@ export function startAxisRhythm(
 	const baseSpacing = authorLetterSpacing(element)
 	let natural: number[] = [], widthLo: number[] = [], widthHi: number[] = [], chars: number[] = [], fontSizes: number[] = []
 	if (linePreservation !== 'none' && hi !== lo) {
-		lineElements.forEach((el) => { el.style.letterSpacing = ''; el.style.transform = ''; el.style.width = ''; el.style.fontVariationSettings = baseFVS })
-		natural = lineElements.map((el) => el.getBoundingClientRect().width)
-		lineElements.forEach((el) => { el.style.fontVariationSettings = overrideAxis(baseFVS, axis, lo) })
-		widthLo = lineElements.map((el) => el.getBoundingClientRect().width)
-		lineElements.forEach((el) => { el.style.fontVariationSettings = overrideAxis(baseFVS, axis, hi) })
-		widthHi = lineElements.map((el) => el.getBoundingClientRect().width)
-		chars = lineElements.map((el) => [...(el.textContent ?? '')].length)
-		fontSizes = lineElements.map((el) => parseFloat(getComputedStyle(el).fontSize) || 0)
+		const all = lines.flat()
+		all.forEach((el) => { el.style.letterSpacing = ''; el.style.transform = ''; el.style.width = ''; el.style.fontVariationSettings = baseFVS })
+		natural = lines.map(lineWidth)
+		all.forEach((el) => { el.style.fontVariationSettings = overrideAxis(baseFVS, axis, lo) })
+		widthLo = lines.map(lineWidth)
+		all.forEach((el) => { el.style.fontVariationSettings = overrideAxis(baseFVS, axis, hi) })
+		widthHi = lines.map(lineWidth)
+		chars = lines.map(lineChars)
+		fontSizes = lines.map((runs) => parseFloat(getComputedStyle(runs[0]).fontSize) || 0)
 	}
 
-	/** Applies one frame's axis value to a line, with its width compensation. */
-	function setLine(el: HTMLElement, i: number, value: number): void {
-		el.style.fontVariationSettings = overrideAxis(baseFVS, axis, value)
+	/** Applies one frame's axis value to a line's runs, with its width compensation. */
+	function setLine(runs: HTMLElement[], i: number, value: number): void {
+		const fvs = overrideAxis(baseFVS, axis, value)
+		runs.forEach((el) => { el.style.fontVariationSettings = fvs })
 		if (!natural.length) return
 		const w = widthLo[i] + (widthHi[i] - widthLo[i]) * (value - lo) / (hi - lo)
 		if (linePreservation === 'spacing' && chars[i] > 0 && fontSizes[i] > 0) {
-			el.style.letterSpacing = `calc(${baseSpacing} + ${((natural[i] - w) / chars[i]) / fontSizes[i]}em)`
+			const ls = `calc(${baseSpacing} + ${((natural[i] - w) / chars[i]) / fontSizes[i]}em)`
+			runs.forEach((el) => { el.style.letterSpacing = ls })
 		} else if (linePreservation === 'scale' && w > 0 && natural[i] > 0) {
-			el.style.transform = `scaleX(${(natural[i] / w).toFixed(6)})`
-			el.style.transformOrigin = 'left center'
+			runs[0].style.transform = `scaleX(${(natural[i] / w).toFixed(6)})`
+			runs[0].style.transformOrigin = 'left center'
 		}
 	}
 
@@ -908,9 +996,9 @@ export function startAxisRhythm(
 		}
 		lastTime = time
 
-		lineElements.forEach((el, i) => {
+		lines.forEach((runs, i) => {
 			const linePhase = (phaseObj.phase + i / period) % 1
-			setLine(el, i, phaseToAxisValue(linePhase, waveShape, values))
+			setLine(runs, i, phaseToAxisValue(linePhase, waveShape, values))
 		})
 
 		if (running) {
@@ -947,11 +1035,20 @@ export function startAxisRhythm(
 	}
 	document.addEventListener('visibilitychange', onVisibilityChange)
 
+	// Reduced motion turned on mid-animation: stop moving and settle on the static texture.
+	function onMotionChange(): void {
+		if (!motionQuery?.matches) return
+		stop()
+		applyAxisRhythm(element, originalHTML, options)
+	}
+	motionQuery?.addEventListener?.('change', onMotionChange)
+
 	/** Cancels the loop and removes listeners; safe to call more than once. */
 	function stop(): void {
 		running = false
 		cancelAnimationFrame(rafId)
 		io?.disconnect()
+		motionQuery?.removeEventListener?.('change', onMotionChange)
 		document.removeEventListener('visibilitychange', onVisibilityChange)
 		if (isPrimary) sharedPhases.delete(element)
 	}

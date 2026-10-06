@@ -6,7 +6,7 @@
 // For wave shapes and overrideAxis, we test via the public applyAxisRhythm surface.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { applyAxisRhythm, getCleanHTML, startAxisRhythm } from '../core/adjust'
+import { applyAxisRhythm, getCleanHTML, startAxisRhythm, removeAxisRhythm } from '../core/adjust'
 import { AXIS_RHYTHM_CLASSES } from '../core/types'
 
 // ─── DOM measurement mock (same as adjust.test.ts) ───────────────────────────
@@ -285,21 +285,23 @@ describe('wordCallIndex reset in beforeEach (mock hygiene)', () => {
 	})
 })
 
-// ─── br aria-hidden ───────────────────────────────────────────────────────────
+// ─── injected br elements ─────────────────────────────────────────────────────
 
-describe('injected br elements have aria-hidden', () => {
+describe('injected br elements', () => {
 	let cleanup: (() => void) | null = null
 	beforeEach(() => { document.body.innerHTML = ''; cleanup = mockMeasurement() })
 	afterEach(() => { cleanup?.(); cleanup = null })
 
-	it('all injected br elements have aria-hidden="true"', () => {
+	// Not aria-hidden: the space before a forced break collapses, so the break is what keeps the words on
+	// either side apart in an accessible name (a wrapped link read as "a long link", not "a longlink").
+	it('injected br elements are not hidden from assistive tech', () => {
 		const el = makeElement(nWords(14))
 		const original = getCleanHTML(el)
 		applyAxisRhythm(el, original, { axis: 'wdth', values: [100, 96], period: 2 })
 		const brs = el.querySelectorAll('br[data-ar-break]')
 		expect(brs.length).toBeGreaterThan(0)
 		brs.forEach((br) => {
-			expect(br.getAttribute('aria-hidden')).toBe('true')
+			expect(br.getAttribute('aria-hidden')).toBeNull()
 		})
 	})
 })
@@ -311,20 +313,37 @@ describe('startAxisRhythm prefers-reduced-motion', () => {
 	beforeEach(() => { document.body.innerHTML = ''; cleanup = mockMeasurement() })
 	afterEach(() => { cleanup?.(); cleanup = null; vi.restoreAllMocks() })
 
-	it('returns a no-op stop function and restores originalHTML on reduced-motion', () => {
+	it('keeps the static texture and does not animate under reduced motion', () => {
 		const el = makeElement(nWords(14))
 		const original = getCleanHTML(el)
-		vi.spyOn(window, 'matchMedia').mockReturnValue({
-			matches: true, media: '', onchange: null,
+		vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => ({
+			matches: q.includes('prefers-reduced-motion'), media: q, onchange: null,
 			addListener: () => {}, removeListener: () => {},
 			addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true,
-		} as MediaQueryList)
+		}) as MediaQueryList)
+		const raf = vi.spyOn(window, 'requestAnimationFrame')
 		const stop = startAxisRhythm(el, original, { axis: 'wdth', values: [100, 96], period: 2 })
-		// Should restore originalHTML, not inject line spans
-		expect(el.innerHTML).toBe(original)
-		expect(el.querySelectorAll(`.${AXIS_RHYTHM_CLASSES.line}`).length).toBe(0)
-		// stop() must not throw
+		expect(el.querySelectorAll(`.${AXIS_RHYTHM_CLASSES.line}`).length).toBeGreaterThan(0)
+		// Only the scroll-restore frame from applyAxisRhythm; no animation loop
+		expect(raf.mock.calls.length).toBeLessThanOrEqual(1)
 		expect(() => stop()).not.toThrow()
+	})
+
+	it('settles on the static texture when reduced motion turns on mid-animation', () => {
+		const el = makeElement(nWords(14))
+		const original = getCleanHTML(el)
+		let onChange: (() => void) | null = null
+		const mq = { matches: false, media: '', onchange: null, addListener: () => {}, removeListener: () => {},
+			addEventListener: (_: string, f: () => void) => { onChange = f }, removeEventListener: () => { onChange = null }, dispatchEvent: () => true }
+		vi.spyOn(window, 'matchMedia').mockImplementation((q: string) => (q.includes('prefers-reduced-motion') ? mq : { ...mq, matches: false, addEventListener: () => {} }) as unknown as MediaQueryList)
+		const cancel = vi.spyOn(window, 'cancelAnimationFrame')
+		startAxisRhythm(el, original, { axis: 'wdth', values: [100, 96], period: 2 })
+		expect(onChange).not.toBeNull()
+		mq.matches = true
+		onChange!()
+		expect(cancel).toHaveBeenCalled()
+		expect(onChange).toBeNull()   // the listener is removed with the loop
+		expect(el.querySelectorAll(`.${AXIS_RHYTHM_CLASSES.line}`).length).toBeGreaterThan(0)
 	})
 })
 
@@ -454,5 +473,34 @@ describe('line grouping with overlapping glyph boxes', () => {
 		const el = makeElement(nWords(14))
 		applyAxisRhythm(el, getCleanHTML(el), { values: [100, 90] })
 		expect(el.querySelectorAll(`.${AXIS_RHYTHM_CLASSES.line}`).length).toBe(2)
+	})
+})
+
+// ─── wrapped links stay one link (2026-10) ────────────────────────────────────
+
+describe('elements that wrap across lines', () => {
+	afterEach(() => { vi.restoreAllMocks() })
+
+	it('a link across two lines stays one <a>, with the break inside it', () => {
+		const el = document.createElement('p')
+		el.innerHTML = 'one two <a href="#x" id="L">three four five</a> six'
+		document.body.appendChild(el)
+		// Words on two lines: "one two three" | "four five six" (stub each word's line by its text)
+		const second = new Set(['four', 'five', 'six'])
+		const proto = HTMLElement.prototype
+		const rectFor = (top: number) => ({ top, bottom: top + 20, left: 0, right: 10, width: 10, height: 20, x: 0, y: top, toJSON() {} })
+		vi.spyOn(proto, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) { return rectFor(second.has(this.textContent ?? '') ? 20 : 0) as DOMRect })
+		vi.spyOn(proto, 'getClientRects').mockImplementation(function (this: HTMLElement) { return [rectFor(second.has(this.textContent ?? '') ? 20 : 0)] as unknown as DOMRectList })
+		const original = getCleanHTML(el)
+		applyAxisRhythm(el, original, { axis: 'wdth', values: [100, 96], period: 2, linePreservation: 'none' })
+		expect(el.querySelectorAll('a').length).toBe(1)
+		expect(el.querySelectorAll('#L').length).toBe(1)
+		expect(el.querySelector('a br[data-ar-break]')).toBeTruthy()
+		expect(el.textContent).toBe('one two three four five six')
+		expect(new Set(Array.from(el.querySelectorAll('.ar-line'), (r) => r.getAttribute('data-ar-line')))).toEqual(new Set(['0', '1']))
+		expect(getCleanHTML(el)).toBe(original)
+		removeAxisRhythm(el, original)
+		expect(el.innerHTML).toBe(original)
+		expect(el.getAttribute('style') ?? '').toBe('')
 	})
 })
