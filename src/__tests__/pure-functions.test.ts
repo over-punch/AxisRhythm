@@ -95,15 +95,16 @@ describe('overrideAxis (via applyAxisRhythm)', () => {
 	})
 
 	it('does not corrupt FVS when axis tag is a suffix of another tag', () => {
-		// "BCD" must not match inside "ABCD" — regex must be anchored
+		// "BCD " must not match inside "ABCD" — regex must be anchored. (Tags are four characters,
+		// space-padded; a three-character tag is now rejected by option validation.)
 		const el = makeElement(nWords(7))
-		el.style.fontVariationSettings = '"ABCD" 200, "BCD" 100'
+		el.style.fontVariationSettings = '"ABCD" 200, "BCD " 100'
 		const original = getCleanHTML(el)
-		applyAxisRhythm(el, original, { axis: 'BCD', values: [50], period: 1 })
+		applyAxisRhythm(el, original, { axis: 'BCD ', values: [50], period: 1 })
 		const line = el.querySelector<HTMLElement>(`.${AXIS_RHYTHM_CLASSES.line}`)!
-		// ABCD must retain its original value; only BCD should change
+		// ABCD must retain its original value; only "BCD " should change
 		expect(line.style.fontVariationSettings).toContain('"ABCD" 200')
-		expect(line.style.fontVariationSettings).toContain('"BCD" 50')
+		expect(line.style.fontVariationSettings).toContain('"BCD " 50')
 		expect(line.style.fontVariationSettings).not.toMatch(/"ABCD"\s+50/)
 	})
 })
@@ -364,5 +365,72 @@ describe('startAxisRhythm', () => {
 		const lines = el.querySelectorAll(`.${AXIS_RHYTHM_CLASSES.line}`)
 		expect(lines.length).toBeGreaterThanOrEqual(2)
 		stop()
+	})
+})
+
+// ─── Review fixes (2026-10) ──────────────────────────────────────────────────
+
+describe('markup and whitespace survive the rebuild', () => {
+	let cleanup: (() => void) | null = null
+	beforeEach(() => { document.body.innerHTML = ''; cleanup = mockMeasurement() })
+	afterEach(() => { cleanup?.(); cleanup = null })
+
+	it('keeps the text, author <br> and inline elements; getCleanHTML returns the input', () => {
+		const html = 'The <em>quick brown</em> fox <a href="#x" id="L">jumps over the</a> <strong>lazy</strong> <em>dog</em>.<br>Second <b>line</b> after a break.'
+		const el = makeElement(html)
+		const text = el.textContent
+		applyAxisRhythm(el, html, { values: [100, 90] })
+		expect(el.textContent).toBe(text)
+		expect(getCleanHTML(el)).toBe(html)
+		// One id in the document, whatever the line breaks
+		expect(el.querySelectorAll('#L').length).toBe(1)
+	})
+
+	it('word spans hold only the word: whitespace stays in the flow', () => {
+		const html = nWords(10)
+		const el = makeElement(html)
+		applyAxisRhythm(el, html, {})
+		expect(el.textContent).toBe(html)
+	})
+
+	it('an empty element is left as it was', () => {
+		const el = makeElement('')
+		applyAxisRhythm(el, '', {})
+		expect(el.innerHTML).toBe('')
+	})
+})
+
+describe('option validation', () => {
+	let cleanup: (() => void) | null = null
+	beforeEach(() => { document.body.innerHTML = ''; cleanup = mockMeasurement(); vi.spyOn(console, 'warn').mockImplementation(() => {}) })
+	afterEach(() => { cleanup?.(); cleanup = null; vi.restoreAllMocks() })
+
+	it('rejects an axis string that would inject extra axes', () => {
+		const el = makeElement(nWords(7))
+		applyAxisRhythm(el, getCleanHTML(el), { axis: 'wdth" 50, "wght', values: [70], period: 1 })
+		const fvs = el.querySelector<HTMLElement>(`.${AXIS_RHYTHM_CLASSES.line}`)!.style.fontVariationSettings
+		expect(fvs).not.toContain('wght')
+		expect(fvs).toContain('"wdth" 70')
+	})
+
+	it('ignores non-numeric values and a NaN period', () => {
+		const el = makeElement(nWords(7))
+		applyAxisRhythm(el, getCleanHTML(el), { values: [80, Number.NaN] as number[], period: Number.NaN })
+		const fvs = el.querySelector<HTMLElement>(`.${AXIS_RHYTHM_CLASSES.line}`)!.style.fontVariationSettings
+		expect(fvs).toContain('"wdth" 80')
+	})
+})
+
+describe('letter-spacing preservation keeps the author tracking', () => {
+	let cleanup: (() => void) | null = null
+	beforeEach(() => { document.body.innerHTML = ''; cleanup = mockMeasurement() })
+	afterEach(() => { cleanup?.(); cleanup = null })
+
+	it('adds to the computed letter-spacing instead of replacing it', () => {
+		const el = makeElement(nWords(7))
+		el.style.letterSpacing = '2px'
+		applyAxisRhythm(el, getCleanHTML(el), { values: [100, 90], linePreservation: 'spacing' })
+		const ls = el.querySelector<HTMLElement>(`.${AXIS_RHYTHM_CLASSES.line}`)!.style.letterSpacing
+		expect(ls.startsWith('calc(2px')).toBe(true)
 	})
 })

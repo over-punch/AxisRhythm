@@ -7,10 +7,14 @@ type SyllableModule = { syllable: (word: string) => number } | { default: (word:
 let _syllable: ((word: string) => number) | null = null
 let _syllableLoading = false
 
-function tryLoadSyllable(): void {
-	if (_syllable !== null || _syllableLoading) return
+let _syllablePromise: Promise<void> | null = null
+
+/** Starts (once) loading the optional `syllable` package; resolves when it is ready or has failed. */
+function tryLoadSyllable(): Promise<void> {
+	if (_syllable !== null) return Promise.resolve()
+	if (_syllableLoading && _syllablePromise) return _syllablePromise
 	_syllableLoading = true
-	import(/* webpackIgnore: true */ /* turbopackIgnore: true */ 'syllable')
+	_syllablePromise = import(/* webpackIgnore: true */ /* turbopackIgnore: true */ 'syllable')
 		.then((m) => {
 			const mod = m as SyllableModule
 			_syllable = 'syllable' in mod ? mod.syllable : (mod as { default: (w: string) => number }).default
@@ -18,8 +22,9 @@ function tryLoadSyllable(): void {
 		.catch(() => {
 			// Reset flag so future callers can retry (e.g. after a network hiccup)
 			_syllableLoading = false
-			console.warn('[axisrhythm] source: "syllable-density" requires the `syllable` package — falling back to "fixed"')
+			warnOnce('syllable', '[axisrhythm] source: "syllable-density" requires the `syllable` package — falling back to "fixed"')
 		})
+	return _syllablePromise
 }
 
 // ─── Pretext (canvas line detection) ─────────────────────────────────────────
@@ -37,16 +42,54 @@ let _pretextLoading = false
  * Kick off a one-time background import of @chenglou/pretext.
  * No-ops if already loading or loaded. Falls back silently if not installed.
  */
-function tryLoadPretext(): void {
-	if (_pretext !== null || _pretextLoading) return
+let _pretextPromise: Promise<void> | null = null
+
+function tryLoadPretext(): Promise<void> {
+	if (_pretext !== null) return Promise.resolve()
+	if (_pretextLoading && _pretextPromise) return _pretextPromise
 	_pretextLoading = true
-	import(/* webpackIgnore: true */ /* turbopackIgnore: true */ '@chenglou/pretext')
+	_pretextPromise = import(/* webpackIgnore: true */ /* turbopackIgnore: true */ '@chenglou/pretext')
 		.then((m) => { _pretext = m as PretextModule })
 		.catch(() => {
 			// Reset flag so future callers can retry (e.g. after a network hiccup)
 			_pretextLoading = false
-			console.warn('[axisrhythm] canvas lineDetection requires @chenglou/pretext — falling back to BCR')
+			warnOnce('pretext', '[axisrhythm] canvas lineDetection requires @chenglou/pretext — falling back to BCR')
 		})
+	return _pretextPromise
+}
+
+/** Warnings already printed, so a missing optional package warns once rather than on every refit. */
+const _warned = new Set<string>()
+
+/** Prints a console warning the first time it is seen. */
+function warnOnce(key: string, message: string): void {
+	if (_warned.has(key)) return
+	_warned.add(key)
+	console.warn(message)
+}
+
+/** The latest apply per element: an optional module that finishes loading re-applies only if nothing newer ran. */
+const _latestApply = new WeakMap<HTMLElement, object>()
+
+/**
+ * Validates options: values must be finite numbers, period a finite number, and axis a four-character
+ * tag (letters, digits or spaces). Invalid entries fall back to the defaults with a warning, so a
+ * malformed option can't inject extra axes into font-variation-settings.
+ */
+function sanitizeOptions(options: AxisRhythmOptions): { axis: string; values: number[]; period: number } {
+	let axis = typeof options.axis === 'string' ? options.axis : DEFAULTS.axis
+	if (!/^[A-Za-z0-9 ]{4}$/.test(axis)) {
+		warnOnce('axis:' + axis, `[axisrhythm] axis "${String(options.axis)}" is not a four-character tag — using "${DEFAULTS.axis}"`)
+		axis = DEFAULTS.axis
+	}
+	let values = Array.isArray(options.values) ? options.values.filter((v) => typeof v === 'number' && Number.isFinite(v)) : DEFAULTS.values
+	if (options.values !== undefined && (!Array.isArray(options.values) || values.length !== options.values.length)) {
+		warnOnce('values', '[axisrhythm] values must be an array of finite numbers — ignoring the invalid entries')
+	}
+	if (!values.length) values = DEFAULTS.values
+	const rawPeriod = Number(options.period ?? DEFAULTS.period)
+	const period = Number.isFinite(rawPeriod) ? Math.max(1, Math.round(rawPeriod)) : DEFAULTS.period
+	return { axis, values, period }
 }
 
 /** Cache: per-element pretext prepared object, keyed by originalHTML to invalidate on content change */
@@ -189,15 +232,44 @@ function springWave(phase: number): number {
  * spring follow the same convention.
  */
 function phaseToAxisValue(phase: number, waveShape: WaveShape, values: number[]): number {
-	const lo = values[0] ?? 100
-	const hi = values[values.length - 1] ?? 96
 	let t: number
 	switch (waveShape) {
 		case 'triangle': t = triangleWave(phase); break
 		case 'spring':   t = springWave(phase);   break
 		default:         t = sineWave(phase);      break
 	}
-	return lo + (hi - lo) * t
+	// Interpolate through every value in order (values[0] at t = 0, the last at t = 1), so a middle
+	// value such as 60 in [100, 60, 140] is reached rather than skipped.
+	if (values.length < 2) return values[0] ?? 100
+	const pos = Math.max(0, Math.min(1, t)) * (values.length - 1)
+	const i = Math.min(values.length - 2, Math.floor(pos))
+	return values[i] + (values[i + 1] - values[i]) * (pos - i)
+}
+
+// ─── Word items ───────────────────────────────────────────────────────────────
+
+/** Per-item data kept during one apply: the whitespace before it, an author <br> before it, and whether it is a whole element. */
+interface ItemMeta {
+	lead: string
+	breakBefore: HTMLBRElement | null
+	atomic?: boolean
+}
+
+/** Elements kept whole during the rebuild (no text of their own to split). */
+const ATOMIC_TAGS = new Set(['IMG', 'SVG', 'INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'VIDEO', 'AUDIO', 'CANVAS', 'IFRAME', 'OBJECT', 'MATH'])
+
+/** Scripts written without spaces between words: every grapheme is a possible line break. */
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u
+
+/**
+ * Splits a space-free token into the pieces a line may break between: graphemes for CJK, Thai and
+ * similar scripts (Intl.Segmenter keeps combining marks with their base), the whole token otherwise.
+ */
+function splitUnspaced(token: string): string[] {
+	if (!UNSPACED_SCRIPT.test(token)) return [token]
+	const Seg = (Intl as unknown as { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(t: string): Iterable<{ segment: string }> } }).Segmenter
+	if (!Seg) return Array.from(token)
+	return Array.from(new Seg(undefined, { granularity: 'grapheme' }).segment(token), (s) => s.segment)
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -270,11 +342,8 @@ export function applyAxisRhythm(
 	// Save scroll position — iOS Safari does not support overflow-anchor: none
 	const scrollY = window.scrollY
 
-	// Resolve options against defaults.
-	const axis = options.axis ?? DEFAULTS.axis
-	const values = options.values ?? DEFAULTS.values
-	if (values.length === 0) return  // guard: empty values array would cause modulo-by-zero
-	const period = Math.max(1, Math.round(options.period ?? DEFAULTS.period))
+	// Resolve options against defaults (invalid values fall back with a warning).
+	const { axis, values, period } = sanitizeOptions(options)
 	// Resolve align: 'end' maps to 'bottom' in LTR and 'top' in RTL.
 	const alignRaw = options.align ?? DEFAULTS.align
 	const align = alignRaw === 'end'
@@ -283,61 +352,101 @@ export function applyAxisRhythm(
 	const lineDetection = options.lineDetection ?? 'bcr'
 	const linePreservation = options.linePreservation ?? DEFAULTS.linePreservation
 
-	// Kick off pretext background load when canvas mode is requested
-	if (lineDetection === 'canvas') tryLoadPretext()
-
-	// Kick off syllable background load when syllable-density source is requested
+	// Optional modules: until they load, the first apply falls back (BCR lines, fixed values); when one
+	// finishes loading, the element is re-applied once, unless something newer has run since.
 	const source = options.source ?? 'fixed'
-	if (source === 'syllable-density') tryLoadSyllable()
+	const applyToken = {}
+	_latestApply.set(element, applyToken)
+	const reapplyWhenLoaded = (load: Promise<void>, ready: () => boolean) => {
+		if (ready()) return
+		load.then(() => {
+			if (ready() && element.isConnected && _latestApply.get(element) === applyToken) applyAxisRhythm(element, originalHTML, options)
+		})
+	}
+	if (lineDetection === 'canvas') reapplyWhenLoaded(tryLoadPretext(), () => _pretext !== null)
+	if (source === 'syllable-density') reapplyWhenLoaded(tryLoadSyllable(), () => _syllable !== null)
 
 	// --- Pass 1: Reset ---
 	element.innerHTML = originalHTML
 
 	// --- Pass 2: Word wrap ---
-	// Collect all text nodes via recursive childNodes walk.
+	// Each word goes in a plain inline span (.ar-word) holding only the word; the whitespace around it
+	// stays as text in the flow, so the browser breaks lines exactly as it does for the original text.
+	// (Measuring words as inline-blocks drops the space at the start of each box, packs lines too
+	// tightly, and the locked nowrap lines then overflow.) Text without spaces (CJK, Thai) is split
+	// into graphemes so each character is a possible break, as it is in normal layout. Author <br>,
+	// images and other childless elements become atomic items so they survive the rebuild.
 	// createTreeWalker is intentionally avoided — it skips inline elements in happy-dom 12.
-	const textNodes: Text[] = []
-	;(function collectTextNodes(node: Node) {
-		if (node.nodeType === Node.TEXT_NODE) {
-			textNodes.push(node as Text)
-		} else {
-			node.childNodes.forEach(collectTextNodes)
-		}
-	})(element)
+	const items: HTMLElement[] = []
+	const meta = new WeakMap<Element, ItemMeta>()
+	let pendingSpace = ''
+	let pendingBreak: HTMLBRElement | null = null
 
-	// Word spans collected in DOM order for later measurement.
-	const wordSpans: HTMLElement[] = []
-
-	for (const textNode of textNodes) {
-		const text = textNode.textContent ?? ''
-		if (!text.trim()) continue
-
-		// Split into alternating [whitespace, word, whitespace, word, …] tokens.
-		const tokens = text.split(/(\S+)/)
-		const fragment = document.createDocumentFragment()
-
-		for (let i = 0; i < tokens.length; i += 2) {
-			const space = tokens[i]       // whitespace gap before this word
-			const word  = tokens[i + 1]  // word (undefined at end of string)
-			if (!word) continue
-
-			// Include trailing whitespace in the last word of this text node to avoid
-			// orphan text nodes at inline-element boundaries dropping inter-word spaces.
-			const isLastWord = tokens[i + 3] === undefined
-			const trailingSpace = isLastWord ? (tokens[i + 2] ?? '') : ''
-
-			const span = document.createElement('span')
-			span.className = AXIS_RHYTHM_CLASSES.word
-			span.textContent = space + word + trailingSpace
-			fragment.appendChild(span)
-			wordSpans.push(span)
-		}
-
-		textNode.parentNode!.replaceChild(fragment, textNode)
+	const pushWord = (span: HTMLElement, lead: string) => {
+		meta.set(span, { lead: pendingSpace + lead, breakBefore: pendingBreak })
+		pendingSpace = ''
+		pendingBreak = null
+		items.push(span)
 	}
 
+	const walk = (function walk(node: Node) {
+		if (node.nodeType === Node.TEXT_NODE) {
+			const textNode = node as Text
+			const text = textNode.textContent ?? ''
+			if (!text.trim()) {
+				// Whitespace between elements ("<em>a</em> <b>b</b>"): carried as the next word's lead.
+				pendingSpace += text
+				return
+			}
+			const fragment = document.createDocumentFragment()
+			const tokens = text.split(/(\s+)/)
+			let lead = ''
+			for (const token of tokens) {
+				if (!token) continue
+				if (/^\s+$/.test(token)) {
+					fragment.appendChild(document.createTextNode(token))
+					lead += token
+					continue
+				}
+				for (const piece of splitUnspaced(token)) {
+					const span = document.createElement('span')
+					span.className = AXIS_RHYTHM_CLASSES.word
+					// No automatic hyphenation inside a word: a locked nowrap line can't hyphenate, so the
+					// measurement mustn't either (a word split across two lines would land on one).
+					span.style.hyphens = 'manual'
+					span.textContent = piece
+					fragment.appendChild(span)
+					pushWord(span, lead)
+					lead = ''
+				}
+			}
+			// Trailing whitespace of this text node leads the next word.
+			pendingSpace += lead
+			textNode.parentNode!.replaceChild(fragment, textNode)
+			return
+		}
+		if (node.nodeType !== Node.ELEMENT_NODE) return
+		const el = node as Element
+		if (el.tagName === 'BR') {
+			pendingBreak = el as HTMLBRElement
+			return
+		}
+		if (!el.hasChildNodes() || ATOMIC_TAGS.has(el.tagName)) {
+			// Images, inline SVG, inputs: kept whole, measured like a word.
+			meta.set(el, { lead: pendingSpace, breakBefore: pendingBreak, atomic: true })
+			pendingSpace = ''
+			pendingBreak = null
+			items.push(el as HTMLElement)
+			return
+		}
+		Array.from(el.childNodes).forEach(walk)
+	})
+	// Walk the element's children (the element itself is never an item, even when empty).
+	Array.from(element.childNodes).forEach(walk)
+
 	// If no words were found, nothing more to do.
-	if (wordSpans.length === 0) {
+	if (items.length === 0) {
+		element.innerHTML = originalHTML
 		requestAnimationFrame(() => {
 			if (Math.abs(window.scrollY - scrollY) > 2) {
 				window.scrollTo({ top: scrollY, behavior: 'instant' })
@@ -345,6 +454,7 @@ export function applyAxisRhythm(
 		})
 		return
 	}
+	const wordSpans = items
 
 	// --- Pass 3: Line grouping ---
 	// Two paths: canvas (pretext arithmetic) or bcr (getBoundingClientRect).
@@ -377,7 +487,9 @@ export function applyAxisRhythm(
 			pretextCache.set(element, { originalHTML, prepared })
 		}
 
-		const maxWidth = element.offsetWidth
+		// The content box: clientWidth includes padding, which text can't use.
+		const cs = getComputedStyle(element)
+		const maxWidth = element.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
 		const lineHeight = getLineHeightPx(element)
 		const { lines } = capturedPretext.layoutWithLines(prepared, maxWidth, lineHeight)
 
@@ -388,21 +500,33 @@ export function applyAxisRhythm(
 		})
 	} else {
 		// --- BCR path (default) ---
-		// Force inline-block so getBoundingClientRect().top identifies the visual row.
-		wordSpans.forEach((span) => {
-			span.style.display = 'inline-block'
-			span.style.whiteSpace = 'nowrap'
-		})
-
+		// Words stay inline (no forced inline-block), so this reads the real layout. A word starts a
+		// new line when its box begins at or below the bottom of the current line; a superscript or
+		// a larger inline image on the same line overlaps it and stays in the line.
 		let currentGroup: LineGroup | null = null
+		let groupBottom = -Infinity
 		for (const span of wordSpans) {
-			const top = Math.round(span.getBoundingClientRect().top)
-			if (currentGroup === null || top !== currentGroup.top) {
+			const rects = span.getClientRects?.()
+			const rect = rects && rects.length ? rects[0] : span.getBoundingClientRect()
+			const top = Math.round(rect.top)
+			const bottom = Math.round(rect.bottom ?? rect.top)
+			if (currentGroup === null || (top !== currentGroup.top && top >= groupBottom - 1)) {
 				currentGroup = { spans: [], top }
 				lineGroups.push(currentGroup)
+				groupBottom = bottom
+			} else {
+				groupBottom = Math.max(groupBottom, bottom)
 			}
 			currentGroup.spans.push(span)
 		}
+	}
+
+	// An author <br> always starts a line. The canvas path (pretext) doesn't see <br>, so split any line
+	// that has one inside it.
+	for (let g = 0; g < lineGroups.length; g++) {
+		const spans = lineGroups[g].spans
+		const cut = spans.findIndex((span, k) => k > 0 && meta.get(span)?.breakBefore)
+		if (cut > 0) lineGroups.splice(g + 1, 0, { spans: spans.splice(cut), top: lineGroups[g].top + 0.5 })
 	}
 
 	const totalLines = lineGroups.length
@@ -447,6 +571,8 @@ export function applyAxisRhythm(
 
 	// Computed axis value per line (stored for use in Pass 5).
 	const lineAxisValues: number[] = []
+	// Elements already copied into an earlier line (their later copies drop the id).
+	const copied = new Set<Element>()
 	const lineElements: HTMLElement[] = []
 
 	lineGroups.forEach((group, lineIndex) => {
@@ -466,35 +592,37 @@ export function applyAxisRhythm(
 		lineSpan.style.display = 'inline-block'
 		lineSpan.style.whiteSpace = 'nowrap'
 
-		// Move word spans into the line span, unwrapping them (keeping text content).
-		// We preserve inline element ancestry by rebuilding the structure.
-		for (const wordSpan of group.spans) {
-			// Walk ancestors up to element to collect inline wrappers.
+		// Rebuild the line's text inside copies of its inline ancestors. Consecutive words that share
+		// an ancestor share one copy (one link stays one link within a line); an element that continues
+		// onto a later line is copied again there, without its id so ids stay unique.
+		let openChain: { source: Element; clone: Element }[] = []
+		group.spans.forEach((item, k) => {
+			const info = meta.get(item)
 			const ancestors: Element[] = []
-			let node: Element | null = wordSpan.parentElement
+			let node: Element | null = item.parentElement
 			while (node && node !== element) {
-				ancestors.push(node)
+				ancestors.unshift(node)
 				node = node.parentElement
 			}
-
-			// The word's text node content.
-			const textContent = wordSpan.textContent ?? ''
-
-			if (ancestors.length === 0) {
-				// Word span is a direct child of element — just append text.
-				lineSpan.appendChild(document.createTextNode(textContent))
-			} else {
-				// Rebuild ancestor inline elements (innermost first in ancestors array).
-				// ancestors[0] = immediate parent of wordSpan, ancestors[last] = child of element.
-				let innerNode: Node = document.createTextNode(textContent)
-				for (let a = 0; a < ancestors.length; a++) {
-					const wrapper = ancestors[a].cloneNode(false) as Element
-					wrapper.appendChild(innerNode)
-					innerNode = wrapper
-				}
-				lineSpan.appendChild(innerNode)
+			let shared = 0
+			while (shared < openChain.length && shared < ancestors.length && openChain[shared].source === ancestors[shared]) shared++
+			openChain = openChain.slice(0, shared)
+			let parent: Node = shared ? openChain[shared - 1].clone : lineSpan
+			// The space before a word sits outside any element the word's predecessor closed. It is kept at
+			// the start of a line too: invisible there (collapsed), but the text and copy-paste keep it.
+			const lead = info?.lead ?? ''
+			void k
+			if (lead) parent.appendChild(document.createTextNode(lead))
+			for (let a = shared; a < ancestors.length; a++) {
+				const copy = ancestors[a].cloneNode(false) as Element
+				if (copied.has(ancestors[a])) copy.removeAttribute('id')
+				copied.add(ancestors[a])
+				parent.appendChild(copy)
+				openChain.push({ source: ancestors[a], clone: copy })
+				parent = copy
 			}
-		}
+			parent.appendChild(info?.atomic ? item.cloneNode(true) : document.createTextNode(item.textContent ?? ''))
+		})
 
 		lineElements.push(lineSpan)
 	})
@@ -506,11 +634,18 @@ export function applyAxisRhythm(
 	lineElements.forEach((lineEl, i) => {
 		element.appendChild(lineEl)
 		if (i < lineElements.length - 1) {
-			const br = document.createElement('br')
-			br.setAttribute('data-ar-break', '')
-			// Hide from screen readers — purely presentational line break
-			br.setAttribute('aria-hidden', 'true')
-			element.appendChild(br)
+			// The author's own <br> at this boundary is kept (getCleanHTML returns it); otherwise an
+			// injected, aria-hidden break that getCleanHTML removes.
+			const authorBreak = meta.get(lineGroups[i + 1].spans[0])?.breakBefore
+			if (authorBreak) {
+				element.appendChild(authorBreak.cloneNode(false))
+			} else {
+				const br = document.createElement('br')
+				br.setAttribute('data-ar-break', '')
+				// Hide from screen readers — purely presentational line break
+				br.setAttribute('aria-hidden', 'true')
+				element.appendChild(br)
+			}
 		}
 	})
 
@@ -544,22 +679,23 @@ export function applyAxisRhythm(
 		if (linePreservation === 'spacing') {
 			// Adjust letter-spacing per line so the total advance width matches
 			// the natural (un-modified) width. Same technique as HoverBoldly.
+			// Added on top of the author's own letter-spacing, which the line would otherwise lose.
+			const baseSpacing = authorLetterSpacing(element)
 			lineElements.forEach((el, i) => {
 				const delta = naturalWidths[i] - axisWidths[i]
-				const charCount = (el.textContent ?? '').length
+				const charCount = [...(el.textContent ?? '')].length
 				if (charCount > 0) {
 					const fontSize = parseFloat(getComputedStyle(el).fontSize)
 					el.style.letterSpacing = fontSize > 0
-						? `${(delta / charCount) / fontSize}em`
+						? `calc(${baseSpacing} + ${(delta / charCount) / fontSize}em)`
 						: ''
 				}
 			})
 		} else if (linePreservation === 'scale') {
-			// Apply a scaleX transform so each line visually occupies its natural width.
-			// The explicit width constrains the layout box; the transform scales content within it.
+			// Apply a scaleX transform so each line visually occupies its natural width. The box keeps
+			// its own width (scaling a box already widened to the natural width would scale it twice).
 			lineElements.forEach((el, i) => {
 				if (axisWidths[i] > 0 && naturalWidths[i] > 0) {
-					el.style.width = `${naturalWidths[i]}px`
 					el.style.transform = `scaleX(${(naturalWidths[i] / axisWidths[i]).toFixed(6)})`
 					el.style.transformOrigin = 'left center'
 				}
@@ -573,6 +709,12 @@ export function applyAxisRhythm(
 			window.scrollTo({ top: scrollY, behavior: 'instant' })
 		}
 	})
+}
+
+/** The element's computed letter-spacing as a CSS length ('normal' becomes 0px). */
+function authorLetterSpacing(el: HTMLElement): string {
+	const ls = getComputedStyle(el).letterSpacing
+	return !ls || ls === 'normal' ? '0px' : ls
 }
 
 /**
@@ -617,9 +759,8 @@ export function startAxisRhythm(
 	// Build the .ar-line DOM structure (static, no animated options needed).
 	applyAxisRhythm(element, originalHTML, options)
 
-	const axis     = options.axis      ?? DEFAULTS.axis
-	const values   = options.values    ?? DEFAULTS.values
-	const period   = Math.max(1, Math.round(options.period ?? DEFAULTS.period))
+	const { axis, values, period } = sanitizeOptions(options)
+	const linePreservation = options.linePreservation ?? DEFAULTS.linePreservation
 	const waveShape = options.waveShape ?? DEFAULTS.waveShape
 	const speed    = options.speed     ?? DEFAULTS.speed
 	const syncTo   = options.syncTo
@@ -655,6 +796,36 @@ export function startAxisRhythm(
 		element.querySelectorAll<HTMLElement>(`.${AXIS_RHYTHM_CLASSES.line}`),
 	)
 
+	// Line-length preservation while animating: measure each line once at its natural width and at the
+	// lowest and highest axis values, then compensate every frame by interpolating between them
+	// (width is close to linear in a single axis), instead of re-measuring 60 times a second.
+	const lo = Math.min(...values), hi = Math.max(...values)
+	const baseSpacing = authorLetterSpacing(element)
+	let natural: number[] = [], widthLo: number[] = [], widthHi: number[] = [], chars: number[] = [], fontSizes: number[] = []
+	if (linePreservation !== 'none' && hi !== lo) {
+		lineElements.forEach((el) => { el.style.letterSpacing = ''; el.style.transform = ''; el.style.width = ''; el.style.fontVariationSettings = baseFVS })
+		natural = lineElements.map((el) => el.getBoundingClientRect().width)
+		lineElements.forEach((el) => { el.style.fontVariationSettings = overrideAxis(baseFVS, axis, lo) })
+		widthLo = lineElements.map((el) => el.getBoundingClientRect().width)
+		lineElements.forEach((el) => { el.style.fontVariationSettings = overrideAxis(baseFVS, axis, hi) })
+		widthHi = lineElements.map((el) => el.getBoundingClientRect().width)
+		chars = lineElements.map((el) => [...(el.textContent ?? '')].length)
+		fontSizes = lineElements.map((el) => parseFloat(getComputedStyle(el).fontSize) || 0)
+	}
+
+	/** Applies one frame's axis value to a line, with its width compensation. */
+	function setLine(el: HTMLElement, i: number, value: number): void {
+		el.style.fontVariationSettings = overrideAxis(baseFVS, axis, value)
+		if (!natural.length) return
+		const w = widthLo[i] + (widthHi[i] - widthLo[i]) * (value - lo) / (hi - lo)
+		if (linePreservation === 'spacing' && chars[i] > 0 && fontSizes[i] > 0) {
+			el.style.letterSpacing = `calc(${baseSpacing} + ${((natural[i] - w) / chars[i]) / fontSizes[i]}em)`
+		} else if (linePreservation === 'scale' && w > 0 && natural[i] > 0) {
+			el.style.transform = `scaleX(${(natural[i] / w).toFixed(6)})`
+			el.style.transformOrigin = 'left center'
+		}
+	}
+
 	/** Milliseconds for one complete oscillation cycle at speed = 1 */
 	const CYCLE_MS = 4000
 	let lastTime: number | null = null
@@ -663,6 +834,11 @@ export function startAxisRhythm(
 	let running = true
 
 	function frame(time: number): void {
+		// The element was removed from the page: stop instead of animating detached nodes forever.
+		if (!element.isConnected) {
+			stop()
+			return
+		}
 		if (lastTime !== null && isPrimary) {
 			const dt = time - lastTime
 			phaseObj.phase = (phaseObj.phase + dt / (CYCLE_MS / speed)) % 1
@@ -671,9 +847,7 @@ export function startAxisRhythm(
 
 		lineElements.forEach((el, i) => {
 			const linePhase = (phaseObj.phase + i / period) % 1
-			el.style.fontVariationSettings = overrideAxis(
-				baseFVS, axis, phaseToAxisValue(linePhase, waveShape, values),
-			)
+			setLine(el, i, phaseToAxisValue(linePhase, waveShape, values))
 		})
 
 		if (running) {
@@ -710,11 +884,14 @@ export function startAxisRhythm(
 	}
 	document.addEventListener('visibilitychange', onVisibilityChange)
 
-	return () => {
+	/** Cancels the loop and removes listeners; safe to call more than once. */
+	function stop(): void {
 		running = false
 		cancelAnimationFrame(rafId)
 		io?.disconnect()
 		document.removeEventListener('visibilitychange', onVisibilityChange)
 		if (isPrimary) sharedPhases.delete(element)
 	}
+
+	return stop
 }
