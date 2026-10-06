@@ -125,7 +125,7 @@ const stop = startAxisRhythm(el, original, {
 			<section className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
 				<h2 className="text-xs uppercase tracking-[0.18em] font-medium text-muted">Accessibility &amp; compatibility</h2>
 				<div className="flex flex-col gap-4 text-sm leading-relaxed">
-					<p><strong>prefers-reduced-motion</strong> — when the user has enabled reduced motion in their OS settings, all axis alternation is skipped and the element is restored to its original HTML. No spans are injected; the text renders as plain prose.</p>
+					<p><strong>prefers-reduced-motion</strong> — when the user has enabled reduced motion in their OS settings, the animation is skipped and the static per-line texture stays, since it isn&apos;t motion. Turning the setting on while the wave is running stops it where the lines are.</p>
 					<p><strong>update: slow</strong> — on e-ink and slow-refresh displays (Kindle, reMarkable, and similar panels), variable font axis animations produce no visible effect because the panel cannot refresh fast enough to show the transition. Axis Rhythm detects <code className="text-xs font-mono">matchMedia(&apos;(update: slow)&apos;)</code> and returns early, restoring the element to its original HTML without injecting any spans or applying any axis values.</p>
 				</div>
 			</section>
