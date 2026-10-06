@@ -174,13 +174,22 @@ function init(root: ParentNode = document): void {
  * re-initialising reruns the read/write passes against the preserved snapshot.
  */
 function refit(): void {
-	TRACKED.forEach((el) => initElement(el))
+	TRACKED.forEach((el) => {
+		// Removed from the page: stop tracking it (its animation stops itself once detached).
+		if (!el.isConnected) { TRACKED.delete(el); return }
+		initElement(el)
+	})
 }
 
 // Re-fit on viewport resize — the container's width drives where lines break. Throttled to
 // one re-fit per animation frame so a drag-resize doesn't rerun the layout on every event.
+// Only a width change can move line breaks: a height-only resize (a mobile URL bar showing or hiding)
+// is ignored, so it doesn't rebuild every element and restart its animation.
 let resizeRaf = 0
+let lastWidth = typeof window !== 'undefined' ? window.innerWidth : 0
 function onResize(): void {
+	if (window.innerWidth === lastWidth) return
+	lastWidth = window.innerWidth
 	if (resizeRaf) cancelAnimationFrame(resizeRaf)
 	resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; refit() })
 }
