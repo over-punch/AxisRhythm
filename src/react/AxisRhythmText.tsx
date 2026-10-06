@@ -1,5 +1,5 @@
 // axis-rhythm/src/react/AxisRhythmText.tsx — React component wrapper
-import React, { forwardRef, useCallback, useRef } from 'react'
+import React, { Children, forwardRef, isValidElement, useCallback, useRef } from 'react'
 import { useAxisRhythm } from './useAxisRhythm'
 import type { AxisRhythmOptions } from '../core/types'
 
@@ -20,6 +20,30 @@ interface AxisRhythmTextProps extends AxisRhythmOptions {
 }
 
 /**
+ * A string that changes whenever the rendered content of `children` changes: text, element types,
+ * keys and primitive props, walked recursively. Functions and objects are ignored.
+ */
+function childrenSignature(children: React.ReactNode): string {
+	const parts: string[] = []
+	const walk = (node: React.ReactNode) => {
+		Children.forEach(node, (child) => {
+			if (child === null || child === undefined || typeof child === 'boolean') return
+			if (typeof child === 'string' || typeof child === 'number') { parts.push(String(child)); return }
+			if (isValidElement(child)) {
+				const type = typeof child.type === 'string' ? child.type : ((child.type as { displayName?: string; name?: string }).displayName ?? (child.type as { name?: string }).name ?? 'C')
+				const props = child.props as Record<string, unknown>
+				const attrs = Object.keys(props).filter((k) => k !== 'children' && ['string', 'number', 'boolean'].includes(typeof props[k])).sort().map((k) => `${k}=${String(props[k])}`)
+				parts.push(`<${type}${child.key != null ? '#' + child.key : ''} ${attrs.join(' ')}>`)
+				walk(props.children as React.ReactNode)
+				parts.push(`</${type}>`)
+			}
+		})
+	}
+	walk(children)
+	return parts.join('\u0000')
+}
+
+/**
  * Drop-in component that applies the axis-rhythm effect to its children.
  * Forwards the ref to the root element while also attaching the internal hook ref.
  * ARIA attributes and other HTML attributes passed as props are forwarded to the element.
@@ -37,7 +61,10 @@ export const AxisRhythmText = forwardRef<HTMLElement, AxisRhythmTextProps>(
 			}
 		}
 
-		const innerRef = useAxisRhythm(options)
+		// The library replaces the element's DOM, so React can't patch new children into it. When the
+		// children's content changes, remount the element (key) and re-apply to the fresh content.
+		const contentKey = childrenSignature(children as React.ReactNode)
+		const innerRef = useAxisRhythm(options, contentKey)
 
 		// Use a ref to hold the callback so the identity stays stable across renders
 		// without needing to list innerRef in the useCallback deps (it is a stable ref object).
@@ -63,7 +90,7 @@ export const AxisRhythmText = forwardRef<HTMLElement, AxisRhythmTextProps>(
 		)
 
 		return (
-			<Tag ref={mergedRef} className={className} style={style} {...htmlProps}>
+			<Tag key={contentKey} ref={mergedRef} className={className} style={style} {...htmlProps}>
 				{children}
 			</Tag>
 		)

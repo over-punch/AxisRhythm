@@ -16,14 +16,19 @@ import type { AxisRhythmOptions } from '../core/types'
  * - Animated mode: the rAF loop is managed by `startAxisRhythm` (pause/resume
  *   handled there via its own IntersectionObserver).
  */
-export function useAxisRhythm(options: AxisRhythmOptions) {
+export function useAxisRhythm(options: AxisRhythmOptions, contentKey?: string) {
+	// contentKey: pass a value that changes when the element's content changes (AxisRhythmText derives
+	// one from its children). The library rewrites the element's DOM, so new content needs a fresh
+	// element and a fresh snapshot rather than React patching nodes that are no longer on the page.
 	const ref = useRef<HTMLElement>(null)
 	const originalHTMLRef = useRef<string | null>(null)
+	/** The element originalHTMLRef was read from; a new element (e.g. after a content change) is read afresh. */
+	const sourceElRef = useRef<HTMLElement | null>(null)
 	const optionsRef = useRef(options)
 	optionsRef.current = options
 	const stopRef = useRef<(() => void) | null>(null)
 
-	const { axis, values, period, align, lineDetection, linePreservation, animate, waveShape, speed, syncTo, intersect } = options
+	const { axis, values, period, align, source, lineDetection, linePreservation, animate, waveShape, speed, syncTo, intersect } = options
 
 	// Serialise the full values array so that changes to any element — including
 	// values[2] and beyond (valid when period > 2) — trigger a re-run. A JSON string
@@ -33,8 +38,9 @@ export function useAxisRhythm(options: AxisRhythmOptions) {
 	const run = useCallback(() => {
 		const el = ref.current
 		if (!el) return
-		if (originalHTMLRef.current === null) {
+		if (originalHTMLRef.current === null || sourceElRef.current !== el) {
 			originalHTMLRef.current = getCleanHTML(el)
+			sourceElRef.current = el
 		}
 		// Stop any running animation before re-running
 		if (stopRef.current) {
@@ -47,7 +53,7 @@ export function useAxisRhythm(options: AxisRhythmOptions) {
 			applyAxisRhythm(el, originalHTMLRef.current, optionsRef.current)
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [axis, valuesKey, period, align, lineDetection, linePreservation, animate, waveShape, speed, syncTo, intersect])
+	}, [axis, valuesKey, period, align, source, lineDetection, linePreservation, animate, waveShape, speed, syncTo, intersect, contentKey])
 
 	useLayoutEffect(() => {
 		const el = ref.current
