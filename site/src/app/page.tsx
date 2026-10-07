@@ -1,3 +1,4 @@
+// Landing page for axisrhythm.com: hero, live demo, how it works, usage, options, accessibility notes and ports.
 import Demo from "@/components/Demo"
 import Hero from "@/components/Hero"
 import CodeBlock from "@/components/CodeBlock"
@@ -25,8 +26,8 @@ export default function Home() {
 
 			{/* Demo */}
 			<section className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-4">
-				<h2 className="text-xs uppercase tracking-[0.18em] font-medium text-muted">Live demo — drag the sliders</h2>
-				<div className="rounded-xl -mx-8 px-8 py-8" style={{ background: "var(--panel)", overflow: 'hidden' }}>
+				<h2 className="text-xs uppercase tracking-[0.18em] font-medium text-muted">Live demo — drag the sliders, switch the text, start the wave</h2>
+				<div className="rounded-xl -mx-6 px-6 sm:-mx-8 sm:px-8 py-8" style={{ background: "var(--panel)", overflow: 'hidden' }}>
 					<Demo />
 				</div>
 			</section>
@@ -41,7 +42,7 @@ export default function Home() {
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="font-semibold text-foreground text-base">Axis Rhythm works line by line</p>
-						<p>The algorithm detects visual lines using glyph positions, then wraps each in a span with its own font-variation-settings. Resize, reflow, inline elements — all handled automatically.</p>
+						<p>The algorithm measures where the browser broke the lines, then styles each line in place with its own font-variation-settings. Links and emphasis stay single elements, so a link that wraps is still one link. It re-runs on resize and when fonts load, and text without spaces (Chinese, Japanese) breaks between characters as usual.</p>
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="font-semibold text-foreground text-base">It aids reading</p>
@@ -49,7 +50,7 @@ export default function Home() {
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="font-semibold text-foreground text-base">Line length preservation</p>
-						<p>The <code className="text-xs font-mono">linePreservation</code> option prevents reflow when the axis changes character widths. <code className="text-xs font-mono">&apos;spacing&apos;</code> compensates with letter-spacing per line — exact widths, no glyph distortion. <code className="text-xs font-mono">&apos;scale&apos;</code> uses a GPU scaleX transform — faster, minor horizontal compression at large ranges.</p>
+						<p>The <code className="text-xs font-mono">linePreservation</code> option prevents reflow when the axis changes character widths. <code className="text-xs font-mono">&apos;spacing&apos;</code> compensates with letter-spacing per line — exact widths, no glyph distortion. <code className="text-xs font-mono">&apos;scale&apos;</code> uses a GPU scaleX transform — no spacing change, minor horizontal compression at large ranges, and it needs one box per line, so an element that crosses a line break is copied into each line.</p>
 					</div>
 				</div>
 			</section>
@@ -65,7 +66,7 @@ export default function Home() {
 						<p className="text-muted">Drop-in component</p>
 						<CodeBlock code={`import { AxisRhythmText } from '@overpunch/axisrhythm'
 
-<AxisRhythmText axis="wdth" values={[100, 88]} period={2}>
+<AxisRhythmText axis="wdth" values={[100, 88]} period={2} linePreservation="spacing">
   Your paragraph text here...
 </AxisRhythmText>`} />
 					</div>
@@ -98,6 +99,8 @@ const stop = startAxisRhythm(el, original, {
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="text-muted">Options</p>
+						{/* Scrolls sideways inside its own box on very narrow screens (the option names do not wrap) */}
+						<div className="overflow-x-auto" tabIndex={0} role="region" aria-label="API options table">
 						<table className="w-full text-xs" aria-label="API options">
 							<caption className="sr-only">AxisRhythm API options</caption>
 							<thead><tr className="text-subtle text-left"><th className="pb-2 pr-6 font-normal">Option</th><th className="pb-2 pr-6 font-normal">Default</th><th className="pb-2 font-normal">Description</th></tr></thead>
@@ -113,10 +116,11 @@ const stop = startAxisRhythm(el, original, {
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">syncTo</td><td className="py-2 pr-6">—</td><td className="py-2">Synchronise phase with another element&rsquo;s animation loop. The target element must already have <code className="font-mono">startAxisRhythm</code> running on it.</td></tr>
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">lineDetection</td><td className="py-2 pr-6">&apos;bcr&apos;</td><td className="py-2">&apos;bcr&apos; reads actual browser layout — ground truth, works with any font and inline HTML. &apos;canvas&apos; uses <a href="https://github.com/chenglou/pretext" className="underline text-subtle">@chenglou/pretext</a> for arithmetic line breaking with no forced reflow on resize. Install pretext separately.</td></tr>
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">linePreservation</td><td className="py-2 pr-6">&apos;none&apos;</td><td className="py-2">&apos;none&apos; — no compensation. &apos;spacing&apos; — adjusts letter-spacing per line to match natural line widths; prevents reflow. &apos;scale&apos; — applies a CSS scaleX transform per line; GPU-composited, no letter-spacing change.</td></tr>
-								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">intersect</td><td className="py-2 pr-6">false</td><td className="py-2">Pause axis alternation when the element scrolls out of view; resume when visible. Uses IntersectionObserver internally.</td></tr>
+								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">intersect</td><td className="py-2 pr-6">false</td><td className="py-2">Static: wait until the element enters the viewport before measuring lines. Animated: pause the wave while the element is off screen. Uses IntersectionObserver internally.</td></tr>
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">as</td><td className="py-2 pr-6">&apos;p&apos;</td><td className="py-2">HTML element to render, e.g. &apos;h1&apos;, &apos;div&apos;, &apos;li&apos;. Accepts any valid React element type. (AxisRhythmText only)</td></tr>
 							</tbody>
 						</table>
+						</div>
 					</div>
 				</div>
 			</section>

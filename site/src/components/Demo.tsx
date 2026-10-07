@@ -1,6 +1,6 @@
 "use client"
 
-// Interactive axis rhythm demo with live controls, cursor/gyro modes, and period slider
+// Interactive axis rhythm demo: axis, period and preservation controls, an animated wave, English/Japanese/Arabic samples, and cursor/gyro modes
 import { useState, useEffect, useDeferredValue, useCallback, memo, useMemo } from "react"
 import { useMediaQuery, useClientValue } from "@/lib/clientValue"
 import { AxisRhythmText } from "@overpunch/axisrhythm"
@@ -8,19 +8,74 @@ import type { AxisRhythmOptions } from "@overpunch/axisrhythm"
 
 type LinePreservation = NonNullable<AxisRhythmOptions['linePreservation']>
 
-const PARAGRAPHS = [
-	`Typography has always been as much about texture as legibility. The even grey of a well-set paragraph — called its colour by compositors — depends on consistency: consistent spacing, consistent weight, consistent rhythm from line to line.`,
-	`Variable fonts crack this open. The wdth axis can compress or expand a letterform; the wght axis can lighten or darken it; the opsz axis can adjust optical weight for the point size. Applied uniformly, these give you a different typeface.`,
-	`Applied line by line, they give you something more interesting: a paragraph with rhythm. Each line carries a different setting but the text reads as one. The difference is a texture the eye feels before the mind names it.`,
-]
+/** Slider range and starting values for one axis of one sample font (axis units; wdth is a percentage). */
+interface AxisRange { min: number; max: number; step: number; defaultHigh: number; defaultLow: number }
 
-/** Per-axis slider config: range and sensible defaults */
-const AXIS_CONFIG = {
-	wdth: { min: 60, max: 125, step: 1, defaultHigh: 110, defaultLow: 70 },
-	wght: { min: 100, max: 900, step: 10, defaultHigh: 700, defaultLow: 300 },
-} as const
+/** One demo sample: its language, writing direction, variable font, the axes that font really has, and its text. */
+interface Sample {
+	label: string
+	lang: string
+	dir: 'ltr' | 'rtl'
+	fontFamily: string
+	axes: { wght: AxisRange; wdth?: AxisRange }
+	paragraphs: string[]
+}
 
-type AxisKey = keyof typeof AXIS_CONFIG
+/**
+ * Demo samples. Axis ranges are each font's real fvar ranges, so every slider position changes the text:
+ * Merriweather wght 300–900 and wdth 87–112; Noto Sans JP and Noto Sans Arabic (as served by Google Fonts) wght 100–900.
+ */
+const SAMPLES = {
+	en: {
+		label: 'English',
+		lang: 'en',
+		dir: 'ltr',
+		fontFamily: 'var(--font-merriweather), serif',
+		axes: {
+			wght: { min: 300, max: 900, step: 10, defaultHigh: 700, defaultLow: 300 },
+			wdth: { min: 87, max: 112, step: 1, defaultHigh: 112, defaultLow: 87 },
+		},
+		paragraphs: [
+			`Typography has always been as much about texture as legibility. The even grey of a well-set paragraph — called its colour by compositors — depends on consistency: consistent spacing, consistent weight, consistent rhythm from line to line.`,
+			`Variable fonts crack this open. The wdth axis can compress or expand a letterform; the wght axis can lighten or darken it; the opsz axis can adjust optical weight for the point size. Applied uniformly, these give you a different typeface.`,
+			`Applied line by line, they give you something more interesting: a paragraph with rhythm. Each line carries a different setting but the text reads as one. The difference is a texture the eye feels before the mind names it.`,
+		],
+	},
+	ja: {
+		label: '日本語',
+		lang: 'ja',
+		dir: 'ltr',
+		fontFamily: 'var(--font-noto-jp), sans-serif',
+		axes: { wght: { min: 100, max: 900, step: 10, defaultHigh: 700, defaultLow: 300 } },
+		paragraphs: [
+			`タイポグラフィは、読みやすさと同じくらい、紙面の質感にかかわる仕事です。よく組まれた段落は均一な灰色に見えますが、その均一さは、字間、太さ、行ごとのリズムがそろってはじめて生まれます。`,
+			`バリアブルフォントを使えば、行ごとに太さを少しずつ変えることができます。日本語は単語の間に空白がないので、行は文字と文字の間で折り返されます。Axis Rhythm はその折り返しをそのまま保ちます。`,
+		],
+	},
+	ar: {
+		label: 'العربية',
+		lang: 'ar',
+		dir: 'rtl',
+		fontFamily: 'var(--font-noto-ar), sans-serif',
+		axes: { wght: { min: 100, max: 900, step: 10, defaultHigh: 700, defaultLow: 300 } },
+		paragraphs: [
+			`الطباعة ليست وضوح الحروف فقط، بل هي أيضًا ملمس الصفحة. الفقرة المصفوفة بعناية تبدو كتلة رمادية متساوية، وهذا التساوي يأتي من انتظام المسافات والوزن والإيقاع من سطر إلى سطر.`,
+			`الخطوط المتغيرة تسمح بتغيير وزن كل سطر على حدة. النص العربي يُكتب من اليمين إلى اليسار، وحروفه تتصل ببعضها، ولذلك تبقى كل كلمة قطعة واحدة ويبقى كل سطر في مكانه.`,
+		],
+	},
+} as const satisfies Record<string, Sample>
+
+/**
+ * Axis values for one cycle: `period` values stepping evenly from `high` to `low`, so every line in the
+ * cycle gets its own value ([high, low] at period 2, [high, mid, low] at 3, and so on).
+ */
+function cycleValues(high: number, low: number, period: number): number[] {
+	const n = Math.max(2, Math.round(period))
+	return Array.from({ length: n }, (_, i) => Math.round(high + ((low - high) * i) / (n - 1)))
+}
+
+type SampleKey = keyof typeof SAMPLES
+type AxisKey = 'wdth' | 'wght'
 
 /** Labelled range slider with value displayed below the track */
 const Slider = memo(function Slider({ label, value, min, max, step, onChange, title, disabled }: { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void; title?: string; disabled?: boolean }) {
@@ -90,9 +145,12 @@ function GyroIcon() {
 }
 
 export default function Demo() {
+	const [sampleKey, setSampleKey] = useState<SampleKey>('en')
 	const [axis, setAxis] = useState<AxisKey>('wght')
-	const [valueHigh, setValueHigh] = useState<number>(AXIS_CONFIG.wght.defaultHigh)
-	const [valueLow, setValueLow] = useState<number>(AXIS_CONFIG.wght.defaultLow)
+	const [valueHigh, setValueHigh] = useState<number>(SAMPLES.en.axes.wght.defaultHigh)
+	const [valueLow, setValueLow] = useState<number>(SAMPLES.en.axes.wght.defaultLow)
+	// Animated wave (startAxisRhythm under the hood); off by default so the static texture is what loads
+	const [wave, setWave] = useState(false)
 	const [period, setPeriod] = useState(2)
 	const [align, setAlign] = useState<'top' | 'bottom'>('top')
 	const [linePreservation, setLinePreservation] = useState<LinePreservation>('spacing')
@@ -106,8 +164,8 @@ export default function Demo() {
 
 	// Gyro-driven values — kept separate from slider state so slider value props
 	// never change during gyro mode (which would cause mobile to scroll to the input)
-	const [gyroHigh, setGyroHigh] = useState<number>(AXIS_CONFIG.wght.defaultHigh)
-	const [gyroLow, setGyroLow] = useState<number>(AXIS_CONFIG.wght.defaultLow)
+	const [gyroHigh, setGyroHigh] = useState<number>(SAMPLES.en.axes.wght.defaultHigh)
+	const [gyroLow, setGyroLow] = useState<number>(SAMPLES.en.axes.wght.defaultLow)
 
 	// Detected capabilities — resolved client-side after mount
 	const showCursor = useMediaQuery('(hover: hover)')
@@ -115,15 +173,30 @@ export default function Demo() {
 	const hasOrientation = useClientValue(() => 'DeviceOrientationEvent' in window, false)
 	const showGyro = isTouch && hasOrientation
 
-	const cfg = AXIS_CONFIG[axis]
+	const sample: Sample = SAMPLES[sampleKey]
+	// The sample's font may not have the chosen axis (only Merriweather has wdth); fall back to wght
+	const cfg: AxisRange = sample.axes[axis] ?? sample.axes.wght
 
-	const handleAxisChange = useCallback((next: AxisKey) => {
-		setAxis(next)
-		setValueHigh(AXIS_CONFIG[next].defaultHigh)
-		setValueLow(AXIS_CONFIG[next].defaultLow)
-		setGyroHigh(AXIS_CONFIG[next].defaultHigh)
-		setGyroLow(AXIS_CONFIG[next].defaultLow)
+	/** Switches sample and axis together, resetting the sliders to that font's defaults for the axis. */
+	const selectSampleAxis = useCallback((nextSample: SampleKey, wanted: AxisKey) => {
+		const axes: Sample['axes'] = SAMPLES[nextSample].axes
+		const nextAxis: AxisKey = axes[wanted] ? wanted : 'wght'
+		const range = axes[nextAxis] ?? axes.wght
+		setSampleKey(nextSample)
+		setAxis(nextAxis)
+		setValueHigh(range.defaultHigh)
+		setValueLow(range.defaultLow)
+		setGyroHigh(range.defaultHigh)
+		setGyroLow(range.defaultLow)
 	}, [])
+
+	const handleAxisChange = useCallback((next: AxisKey) => selectSampleAxis(sampleKey, next), [selectSampleAxis, sampleKey])
+	const handleSampleChange = useCallback((next: SampleKey) => {
+		selectSampleAxis(next, axis)
+		// Browsers add no letter-spacing between joined Arabic letters, so 'spacing' can only recover part of the
+		// width there: use 'scale' for the Arabic sample, and go back to 'spacing' when leaving it.
+		setLinePreservation(prev => next === 'ar' ? (prev === 'spacing' ? 'scale' : prev) : (sampleKey === 'ar' && prev === 'scale' ? 'spacing' : prev))
+	}, [selectSampleAxis, axis, sampleKey])
 
 	// Effective values: gyro-driven when gyroMode is active, slider-driven otherwise
 	const effectiveHigh = gyroMode ? gyroHigh : valueHigh
@@ -132,6 +205,8 @@ export default function Demo() {
 	const dValueHigh = useDeferredValue(effectiveHigh)
 	const dValueLow = useDeferredValue(effectiveLow)
 	const dPeriod = useDeferredValue(period)
+	// One value per line of the cycle; memoised so the array is stable between renders
+	const values = useMemo(() => cycleValues(dValueHigh, dValueLow, dPeriod), [dValueHigh, dValueLow, dPeriod])
 
 	// Cursor mode — X controls valueHigh (mapped to cfg.min–cfg.max), Y controls valueLow (inverted: top=high)
 	useEffect(() => {
@@ -242,11 +317,11 @@ export default function Demo() {
 
 	// Memoised sample style — stable reference avoids unnecessary AxisRhythmText re-runs
 	const sampleStyle = useMemo<React.CSSProperties>(() => ({
-		fontFamily: "var(--font-merriweather), serif",
+		fontFamily: sample.fontFamily,
 		fontSize: "1.125rem",
 		lineHeight: "1.8",
 		fontVariationSettings: '"wght" 300, "opsz" 18, "wdth" 100',
-	}), [])
+	}), [sample.fontFamily])
 
 	const activeMode = cursorMode || gyroMode
 
@@ -254,29 +329,49 @@ export default function Demo() {
 		<div className="w-full">
 			{/* Responsive grid — single column on narrow mobile, three columns on sm+ */}
 			<div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-6">
-				<Slider label="Axis High" value={valueHigh} min={cfg.min} max={cfg.max} step={cfg.step} onChange={setValueHigh} disabled={gyroMode} title="The maximum axis value assigned to lines — lines at the peak of each wave cycle will use this setting" />
-				<Slider label="Axis Low" value={valueLow} min={cfg.min} max={cfg.max} step={cfg.step} onChange={setValueLow} disabled={gyroMode} title="The minimum axis value assigned to lines — lines at the trough of each wave cycle will use this setting" />
-				<Slider label="Period" value={period} min={1} max={6} step={1} onChange={setPeriod} title="How many lines it takes to complete one full high-to-low-to-high cycle — shorter period = tighter alternation, longer = slower rhythm" />
+				<Slider label="Axis High" value={valueHigh} min={cfg.min} max={cfg.max} step={cfg.step} onChange={setValueHigh} disabled={gyroMode} title="The axis value of the first line in each cycle" />
+				<Slider label="Axis Low" value={valueLow} min={cfg.min} max={cfg.max} step={cfg.step} onChange={setValueLow} disabled={gyroMode} title="The axis value of the last line in each cycle" />
+				<Slider label="Period" value={period} min={2} max={6} step={1} onChange={setPeriod} title="Lines per cycle. At 2 the lines alternate High and Low; a longer period steps evenly from High to Low over that many lines, then starts again" />
 			</div>
 			<div className="flex flex-wrap items-center gap-3 mb-8">
 				<div role="group" aria-label="Axis" className="flex items-center gap-2">
 					<span className="text-xs uppercase tracking-[0.18em] font-medium text-muted">Axis</span>
-					{(['wdth', 'wght'] as const).map(v => (
-						<button key={v} onClick={() => handleAxisChange(v)} aria-pressed={axis === v} title={v === 'wdth' ? 'Animate the width axis — varies how condensed or expanded each line appears' : 'Animate the weight axis — varies how light or heavy each line appears'} className="text-xs px-3 py-1 rounded-full border transition-opacity" style={{ borderColor: 'currentColor', opacity: axis === v ? 1 : 0.5, background: axis === v ? 'var(--btn-bg)' : 'transparent' }}>{v}</button>
-					))}
+					{(['wdth', 'wght'] as const).map(v => {
+						const available = Boolean(sample.axes[v])
+						return (
+							<button key={v} onClick={() => handleAxisChange(v)} aria-pressed={axis === v} disabled={!available} title={!available ? 'This sample\'s font has no width axis' : v === 'wdth' ? 'Cycle the width axis: how condensed or expanded each line is' : 'Cycle the weight axis: how light or heavy each line is'} className="text-xs px-3 py-1 rounded-full border transition-opacity" style={{ borderColor: 'currentColor', opacity: !available ? 0.2 : axis === v ? 1 : 0.5, background: axis === v ? 'var(--btn-bg)' : 'transparent', cursor: available ? 'pointer' : 'not-allowed' }}>{v}</button>
+						)
+					})}
 				</div>
-				<div role="group" aria-label="Align" className="flex items-center gap-2 ml-4">
+				<div role="group" aria-label="Align" className="flex items-center gap-2 sm:ml-4">
 					<span className="text-xs uppercase tracking-[0.18em] font-medium text-muted">Align</span>
 					{(['top', 'bottom'] as const).map(v => (
-						<button key={v} onClick={() => setAlign(v)} aria-pressed={align === v} title={v === 'top' ? 'Align lines to the top baseline — rhythm starts from the first line downward' : 'Align lines to the bottom baseline — rhythm starts from the last line upward'} className="text-xs px-3 py-1 rounded-full border transition-opacity" style={{ borderColor: 'currentColor', opacity: align === v ? 1 : 0.5, background: align === v ? 'var(--btn-bg)' : 'transparent' }}>{v}</button>
+						<button key={v} onClick={() => setAlign(v)} aria-pressed={align === v} title={v === 'top' ? 'Count the cycle from the first line down' : 'Count the cycle from the last line up, so the last line always gets the first value'} className="text-xs px-3 py-1 rounded-full border transition-opacity" style={{ borderColor: 'currentColor', opacity: align === v ? 1 : 0.5, background: align === v ? 'var(--btn-bg)' : 'transparent' }}>{v}</button>
 					))}
 				</div>
-				<div role="group" aria-label="Preserve" className="flex items-center gap-2 ml-4">
+				<div role="group" aria-label="Preserve" className="flex flex-wrap items-center gap-2 sm:ml-4">
 					<span className="text-xs uppercase tracking-[0.18em] font-medium text-muted">Preserve</span>
 					{(['none', 'spacing', 'scale'] as const).map(v => (
-						<button key={v} onClick={() => setLinePreservation(v)} aria-pressed={linePreservation === v} title={v === 'none' ? 'No compensation — axis changes may shift line heights and cause ragged paragraph edges' : v === 'spacing' ? 'Adjust letter-spacing per line to keep each line the same length despite axis variation' : 'Scale each line uniformly to keep line lengths consistent despite axis variation'} className="text-xs px-3 py-1 rounded-full border transition-opacity" style={{ borderColor: 'currentColor', opacity: linePreservation === v ? 1 : 0.5, background: linePreservation === v ? 'var(--btn-bg)' : 'transparent' }}>{v}</button>
+						<button key={v} onClick={() => setLinePreservation(v)} aria-pressed={linePreservation === v} title={v === 'none' ? 'No compensation: each line gets wider or narrower with its axis value, and wide lines can pass the edge of the column' : v === 'spacing' ? (sample.dir === 'rtl' ? 'Adjust letter-spacing per line. Joined Arabic letters take no letter-spacing, so this recovers only part of the width here: use scale' : 'Adjust letter-spacing per line so each line keeps the length it had before the axis changed') : 'Scale each line horizontally (scaleX) so it keeps the length it had before the axis changed'} className="text-xs px-3 py-1 rounded-full border transition-opacity" style={{ borderColor: 'currentColor', opacity: linePreservation === v ? 1 : 0.5, background: linePreservation === v ? 'var(--btn-bg)' : 'transparent' }}>{v}</button>
 					))}
 				</div>
+
+				<div role="group" aria-label="Sample text" className="flex flex-wrap items-center gap-2">
+					<span className="text-xs uppercase tracking-[0.18em] font-medium text-muted">Text</span>
+					{(Object.keys(SAMPLES) as SampleKey[]).map(k => (
+						<button key={k} onClick={() => handleSampleChange(k)} aria-pressed={sampleKey === k} lang={SAMPLES[k].lang} title={k === 'en' ? 'English in Merriweather (weight and width axes)' : k === 'ja' ? 'Japanese in Noto Sans JP: no spaces between words, so lines break between characters' : 'Arabic in Noto Sans Arabic: right-to-left, joined letters'} className="text-xs px-3 py-1 rounded-full border transition-opacity" style={{ borderColor: 'currentColor', opacity: sampleKey === k ? 1 : 0.5, background: sampleKey === k ? 'var(--btn-bg)' : 'transparent' }}>{SAMPLES[k].label}</button>
+					))}
+				</div>
+				<button
+					onClick={() => setWave(v => !v)}
+					aria-label={wave ? 'Stop the animated wave' : 'Animate: turn the static texture into a moving wave'}
+					aria-pressed={wave}
+					title="Animate the axis as a wave that drifts through the lines (one cycle every 4 seconds). Stays still when your system asks for reduced motion."
+					className="text-xs px-3 py-1 rounded-full border transition-opacity sm:ml-4"
+					style={{ borderColor: 'currentColor', opacity: wave ? 1 : 0.5, background: wave ? 'var(--btn-bg)' : 'transparent' }}
+				>
+					Wave
+				</button>
 
 				{/* Cursor mode — desktop/hover-capable devices only */}
 				{showCursor && (
@@ -322,16 +417,16 @@ export default function Demo() {
 			)}
 			<div className="relative pb-8">
 				<div className="flex flex-col gap-8">
-					{PARAGRAPHS.map((para) => (
-						<AxisRhythmText key={para.slice(0, 20)} axis={axis} values={[dValueHigh, dValueLow]} period={dPeriod} align={align} linePreservation={linePreservation} style={sampleStyle}>
+					{sample.paragraphs.map((para) => (
+						<AxisRhythmText key={para.slice(0, 20)} axis={axis} values={values} period={dPeriod} align={align} linePreservation={linePreservation} animate={wave} lang={sample.lang} dir={sample.dir} style={sampleStyle}>
 							{para}
 						</AxisRhythmText>
 					))}
 				</div>
 				{beforeAfter && (
 					<div aria-hidden style={{ position: 'absolute', top: 0, left: 0, width: '100%', pointerEvents: 'none', opacity: 0.25 }} className="flex flex-col gap-8">
-						{PARAGRAPHS.map((para) => (
-							<p key={para.slice(0, 20)} style={{ ...sampleStyle, margin: 0 }}>{para}</p>
+						{sample.paragraphs.map((para) => (
+							<p key={para.slice(0, 20)} lang={sample.lang} dir={sample.dir} style={{ ...sampleStyle, margin: 0 }}>{para}</p>
 						))}
 					</div>
 				)}

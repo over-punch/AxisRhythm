@@ -1,9 +1,14 @@
+// Root layout for axisrhythm.com: metadata, fonts (Inter, plus Noto Sans JP and Arabic for the demo samples) and the shared header.
 import type { Metadata } from "next"
 import "./globals.css"
-import { Inter } from "next/font/google"
+import { Inter, Noto_Sans_JP, Noto_Sans_Arabic } from "next/font/google"
 import SiteHeader from "../components/SiteHeader"
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" })
+/** Variable Noto Sans JP (wght 100–900) for the demo's Japanese sample; fetched only when that sample is shown. */
+const notoJp = Noto_Sans_JP({ weight: "variable", preload: false, display: "swap", variable: "--font-noto-jp" })
+/** Variable Noto Sans Arabic (wght 100–900) for the demo's right-to-left sample; fetched only when that sample is shown. */
+const notoAr = Noto_Sans_Arabic({ weight: "variable", subsets: ["arabic"], preload: false, display: "swap", variable: "--font-noto-ar" })
 
 export const metadata: Metadata = {
 	title: "Axis Rhythm — Per-line variable font axis alternation",
@@ -33,7 +38,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
 	return (
-		<html lang="en" className={`h-full antialiased ${inter.variable}`}>
+		<html lang="en" className={`h-full antialiased ${inter.variable} ${notoJp.variable} ${notoAr.variable}`}>
 			<body className="min-h-full flex flex-col">
 				<SiteHeader current="axisRhythm" githubUrl="https://github.com/over-punch/AxisRhythm" />{children}</body>
 		</html>
