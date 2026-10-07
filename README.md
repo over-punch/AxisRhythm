@@ -4,11 +4,11 @@
 
 CSS applies `font-variation-settings` to the whole element — every line gets the same axis value. Axis Rhythm works line by line, cycling any OpenType axis through a sequence of values across paragraph lines. The result is a texture the eye reads as rhythm, not noise. Like column highlighting for text.
 
-![A paragraph where the font weight axis alternates line by line — odd lines bold, even lines light — yet the text reads as a single block](https://raw.githubusercontent.com/over-punch/AxisRhythm/main/assets/hero.png?v=1)
+![A paragraph where the font weight axis alternates line by line — odd lines bold, even lines light — yet the text reads as a single block](https://raw.githubusercontent.com/over-punch/AxisRhythm/main/assets/hero.png?v=2)
 
 **[axisrhythm.com](https://axisrhythm.com)** · [npm](https://www.npmjs.com/package/@overpunch/axisrhythm) · [GitHub](https://github.com/over-punch/AxisRhythm)
 
-TypeScript · Zero runtime dependencies · ~4.8 kB gzipped · React optional · Vanilla JS
+TypeScript · Zero runtime dependencies · 6.6 kB gzipped (vanilla), 8.4 kB with the React component · React optional · Vanilla JS
 
 ---
 
@@ -56,6 +56,33 @@ import { AxisRhythmText } from '@overpunch/axisrhythm'
 
 `linePreservation="spacing"` prevents line overflow by compensating each line's width with letter-spacing. For display or headline text where overflow is acceptable (or part of the effect), omit it or set `linePreservation="none"`.
 
+In the App Router, put it in a client component and use that from your page:
+
+```tsx
+// components/RhythmParagraph.tsx
+"use client"
+import type { ReactNode } from 'react'
+import { AxisRhythmText } from '@overpunch/axisrhythm'
+
+export function RhythmParagraph({ children }: { children: ReactNode }) {
+  return (
+    <AxisRhythmText className="rhythm" axis="wght" values={[460, 380]} period={2} linePreservation="spacing">
+      {children}
+    </AxisRhythmText>
+  )
+}
+```
+
+Add `animate` for the moving wave (`waveShape` and `speed` tune it):
+
+```tsx
+<AxisRhythmText axis="wght" values={[300, 700]} period={4} linePreservation="spacing" animate speed={0.5}>
+  Your paragraph text here...
+</AxisRhythmText>
+```
+
+The component and the hook clean up after themselves: the animation stops and observers disconnect on unmount. When the children change, the component re-measures the new text.
+
 ### React hook
 
 ```tsx
@@ -66,14 +93,15 @@ const ref = useAxisRhythm({ axis: 'wdth', values: [100, 88], period: 2 })
 return <p ref={ref}>{children}</p>
 ```
 
-The hook re-runs automatically on resize via `ResizeObserver` and after fonts load via `document.fonts.ready`.
+The hook re-runs automatically on resize via `ResizeObserver` and after fonts load via `document.fonts.ready`. It re-measures when the element's width changes, in static and animated mode (an animation restarts from the beginning of its cycle).
 
 ### Vanilla JS
 
 ```ts
 import { applyAxisRhythm, startAxisRhythm, removeAxisRhythm, getCleanHTML } from '@overpunch/axisrhythm'
 
-const el = document.querySelector('p')
+const el = document.querySelector('p')   // in TypeScript: querySelector<HTMLElement>('p')!
+// Take the snapshot once, before the first apply; pass the same string to every later call.
 const original = getCleanHTML(el)
 const opts = { axis: 'wdth', values: [100, 88], period: 2 }
 
@@ -114,7 +142,7 @@ const opts: AxisRhythmOptions = { axis: 'wdth', values: [100, 88], period: 2 }
 | `period` | `2` | Lines per cycle. Set equal to `values.length` — if smaller, trailing values are never reached; if larger, values repeat within the cycle |
 | `align` | `'top'` | `'top' \| 'bottom' \| 'end'`. `'top'` counts from the first line; `'bottom'` counts from the last; `'end'` is direction-aware — equivalent to `'bottom'` in LTR text and `'top'` in RTL text |
 | `lineDetection` | `'bcr'` | `'bcr'` reads actual browser layout — ground truth, works with any font and inline HTML. `'canvas'` uses `@chenglou/pretext` for arithmetic line breaking with no forced reflow on resize (`npm install @chenglou/pretext`). Falls back to `'bcr'` while pretext loads |
-| `linePreservation` | `'none'` | `'none'` — no compensation; line widths vary with the axis value (best for display type where reflow is part of the effect). `'spacing'` — adjusts letter-spacing per line to match natural widths; prevents overflow; **recommended for body text**. `'scale'` — applies a GPU scaleX transform per line; no letter-spacing changes, slight horizontal glyph compression at large axis ranges |
+| `linePreservation` | `'none'` | `'none'` — no compensation; line widths vary with the axis value (best for display type where reflow is part of the effect). `'spacing'` — adjusts letter-spacing per line to match natural widths; prevents overflow; **recommended for body text**. `'scale'` — applies a GPU scaleX transform per line; no letter-spacing changes, slight horizontal glyph compression at large axis ranges. For Arabic and other joined scripts use `'scale'` (see [Scripts](#how-it-works)) |
 | `source` | `'fixed'` | `'fixed'` — cycle through `values` in order. `'syllable-density'` — per-line syllable density drives the axis value; `values[0]` → simplest lines, `values[last]` → most complex. Requires the optional `syllable` package: `npm install syllable` |
 | `animate` | `false` | Turn the static snapshot into a continuous ambient wave via `startAxisRhythm`. Each line is offset in phase so the wave drifts across the paragraph over time |
 | `waveShape` | `'sine'` | Wave shape for animated mode: `'sine'` (smooth), `'triangle'` (linear in/out), `'spring'` (sine with slight overshoot) |
@@ -127,9 +155,13 @@ const opts: AxisRhythmOptions = { axis: 'wdth', values: [100, 88], period: 2 }
 
 ## How it works
 
-![Side by side: the same paragraph set in plain CSS at one weight, versus Axis Rhythm cycling the weight axis line by line — both read as a single block, but the right pane carries a per-line texture](https://raw.githubusercontent.com/over-punch/AxisRhythm/main/assets/before-after.png?v=1)
+![Side by side: the same paragraph set in plain CSS at one weight, versus Axis Rhythm cycling the weight axis line by line — both read as a single block, but the right pane carries a per-line texture](https://raw.githubusercontent.com/over-punch/AxisRhythm/main/assets/before-after.png?v=2)
 
-The algorithm detects visual lines by measuring word span positions with `getBoundingClientRect()`, then styles each line with its own `font-variation-settings`: the line's text is wrapped in `.ar-line` spans in place (one per element the line passes through, all with the same `data-ar-line` index), and a `<br>` at the start of each line keeps the lines where they fall. The injected value overrides only the target axis — all other axes set on the parent element are preserved by reading and patching the computed `fontVariationSettings` string before writing. Runs on mount and on every resize via `ResizeObserver`. Re-runs when fonts finish loading (`document.fonts.ready`). Under `prefers-reduced-motion: reduce` the static texture is kept and only the animation (`startAxisRhythm`) is skipped; turning the setting on mid-animation stops it and leaves the static texture.
+![The same paragraph three times with the weight axis alternating 900 and 300 on a 300 base: with linePreservation 'none' line lengths change by up to 22.6 px and one line passes the dashed column edge by 3.1 px; with 'spacing' and 'scale' every line keeps its length and stays inside the column](https://raw.githubusercontent.com/over-punch/AxisRhythm/main/assets/preservation.png?v=1)
+
+*`linePreservation` on a 287 px column (Merriweather 17 px, `wght` 900 / 300 per line on a 300 base, headless Chromium, `npm run capture`): with `'none'` line lengths change by up to 22.6 px and the widest line ends 3.1 px past the column; with `'spacing'` they change by 0.0 px and with `'scale'` by 0.1 px, and nothing passes the column.*
+
+The algorithm detects visual lines by measuring word span positions with `getBoundingClientRect()`, then styles each line with its own `font-variation-settings`: the line's text is wrapped in `.ar-line` spans in place (one per element the line passes through, all with the same `data-ar-line` index), and a `<br>` at the start of each line keeps the lines where they fall. The injected value overrides only the target axis — all other axes set on the parent element are preserved by reading and patching the computed `fontVariationSettings` string before writing. Runs on mount and on every resize via `ResizeObserver` (width changes only). Re-runs when fonts finish loading (`document.fonts.ready`). Under `prefers-reduced-motion: reduce` the static texture is kept and only the animation (`startAxisRhythm`) is skipped; turning the setting on mid-animation stops it and leaves the static texture.
 
 **Line break safety:** Each run starts from the original HTML, detects lines at the element's natural layout (words are measured inline, with the spaces between them left in the text flow), then locks them with `white-space: nowrap`. The axis variation doesn't move line breaks. Text without spaces between words (Chinese, Japanese, Korean, Thai) breaks between characters, as it does in normal layout.
 
@@ -139,7 +171,11 @@ The algorithm detects visual lines by measuring word span positions with `getBou
 
 **Width overflow:** Applying different axis values per line alters character widths, so lines may grow wider or narrower than the container. `linePreservation: 'none'` (default) is appropriate for display or headline type where the axis range is large and overflow is intentional. For body text — or any context where line edges must stay flush — use `linePreservation: 'spacing'` (adjusts letter-spacing to compensate) or `'scale'` (GPU scaleX transform).
 
-The `linePreservation` pass measures each line's natural width before applying the axis value, then applies axis and measures again. The delta becomes either a letter-spacing correction (`'spacing'`, added on top of any letter-spacing you've set) or a `scaleX` transform (`'scale'`) per line. While animating, each line is measured once at the lowest and highest axis values and the correction is interpolated per frame.
+The `linePreservation` pass measures each line's natural width before applying the axis value, then applies axis and measures again. The delta becomes either a letter-spacing correction (`'spacing'`, added on top of any letter-spacing you've set) or a `scaleX` transform (`'scale'`) per line. While animating, each line is measured once at the lowest and highest axis values and the correction is interpolated per frame. Both modes also hold inside an element with CSS `zoom`.
+
+**Scripts:** Japanese, Chinese, Korean and Thai wrap between characters and take the axis like any other text. Right-to-left text works too: `align: 'end'` follows the reading direction, and `'scale'` puts each line back exactly where it was, whatever the direction or `text-align`. Arabic and other joined scripts are the exception for `'spacing'`: browsers put no letter-spacing between joined letters, so it recovers only part of the width. Measured in Chromium on the site demo (Noto Sans Arabic 18 px, `wght` 700 on a 300 base, 1024 px column): the bold line ends 87.9 px past the column with `'none'`, 69.1 px with `'spacing'`, 0 px with `'scale'`. Use `'scale'` there. The font needs the axis in every script you set: Merriweather has no Japanese or Arabic glyphs, so the fallback font decides whether anything changes.
+
+**Cost:** one apply resets the element, measures every word once and styles the lines: reads are batched before writes. On the 49-word, 8-line paragraph above it took 0.5 to 0.6 ms depending on the mode (median of 25 runs each, under 2 ms worst, headless Chromium on a busy laptop, `npm run capture`). It runs once per width change, not per frame; the animation measures each line at the two ends of the range once and then only writes styles each frame. `lineDetection: 'canvas'` avoids the layout read on resize if you install `@chenglou/pretext`.
 
 ---
 
@@ -147,10 +183,24 @@ The `linePreservation` pass measures each line's natural width before applying t
 
 - **Runtime:** any browser with variable-font and `font-variation-settings` support (all current evergreen browsers). The effect is purely visual and degrades to plain text everywhere else.
 - **React is optional.** It is an optional peer dependency, needed only for the `AxisRhythmText` component and `useAxisRhythm` hook. The main entry point also exports those, so it imports `react`; without React installed, import the vanilla API from the React-free subpath: `import { applyAxisRhythm } from '@overpunch/axisrhythm/core'`.
-- **Zero runtime dependencies**, ~4.8 kB gzipped (ESM). `@chenglou/pretext` and `syllable` are optional peers, pulled in only for `lineDetection: 'canvas'` and `source: 'syllable-density'` respectively.
+- **Zero runtime dependencies.** Size, from `npm run build` and `gzip -9` on the ESM output: `dist/core.js` (the vanilla API, what `/core` gives you) 6,578 B; the default entry adds `dist/index.js`, 1,809 B, for the React hook and component. `sideEffects: false`. `@chenglou/pretext` and `syllable` are optional peers, pulled in only for `lineDetection: 'canvas'` and `source: 'syllable-density'` respectively.
 - **SSR / first paint:** line spans are computed in the browser from measured layout, so server-rendered markup ships as a plain paragraph and the rhythm appears after hydration and `document.fonts.ready`. Expect a brief flash of unstyled (un-rhythmed) text on first load; pair it with `font-display: swap`/`block`. Server-side stable spans are on the roadmap (see [Future improvements](#future-improvements)).
-- **Accessibility:** under `prefers-reduced-motion: reduce` the animation is skipped and the static per-line texture stays (it isn't motion). Line wrapping keeps the text, including its spaces, so copy-paste and screen readers get the original words. A link that wraps stays one link (except with `linePreservation: 'scale'`, see **Markup** above). The injected line breaks are not hidden from screen readers: the space before a forced break collapses, so the break is what keeps the words apart in a wrapped link's name.
+- **Accessibility:** under `prefers-reduced-motion: reduce` the animation is skipped and the static per-line texture stays (it isn't motion). Line wrapping keeps the text, including its spaces, so copy-paste and screen readers get the original words. A link that wraps stays one link (except with `linePreservation: 'scale'`, see **Markup** above). The injected line breaks are not hidden from screen readers: the space before a forced break collapses, so the break is what keeps the words apart in a wrapped link's name. On displays that report `update: slow` (e-ink), the effect is skipped and the text is left as written.
+- **Is it safe for body text?** The texture is a design choice, not a tested reading aid: nobody has measured whether it helps or hurts reading, so keep the range small for long text (the alternating lines in the images above are deliberately strong so they show at README size) and check contrast on the lightest lines. Lines are locked where they were measured and re-measured when the element's width changes, which covers window resizes and, in a fluid layout, browser zoom. A change of font size alone (text-only zoom, a user stylesheet) leaves the width the same and is not detected, so the locked lines can run past the column until the next resize; call `applyAxisRhythm` again if you change the font size yourself. Screen-reader behaviour was checked in Chromium's accessibility tree (a wrapped link is one link with one name), not with JAWS, NVDA or VoiceOver.
 - **Webflow embed:** `source: 'syllable-density'` and `lineDetection: 'canvas'` need the optional npm packages, which the script-tag embed can't load; it falls back to `'fixed'` and browser line detection.
+
+---
+
+## Development
+
+```bash
+npm install
+npm run test:run   # 80 unit tests (vitest + happy-dom)
+npm run build      # dist/ (ESM + CJS + types)
+npm run capture    # rebuilds assets/*.png from scripts/capture.html and prints the measurements quoted above
+```
+
+The demo site is in `site/` (Next.js). Bugs and questions: [github.com/over-punch/AxisRhythm/issues](https://github.com/over-punch/AxisRhythm/issues). Licence: [MIT](LICENSE).
 
 ---
 

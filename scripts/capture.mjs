@@ -45,16 +45,24 @@ const { port } = server.address();
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ deviceScaleFactor: 2 });
+// A script error in capture.html would otherwise leave no scenes and no message.
+page.on("pageerror", (e) => console.error("Page error: %s", e.message));
+page.on("console", (m) => { if (m.type() === "error") console.error("Console error: %s", m.text()); });
 await page.goto(`http://localhost:${port}/scripts/capture.html`, { waitUntil: "networkidle" });
 await page.evaluate(() => window.__ready ?? document.fonts.ready);
 await page.waitForTimeout(700); // let variable glyphs + per-line spans paint
 
 const ids = await page.$$eval(".scene", (els) => els.map((e) => e.id));
+if (!ids.length) { console.error("No scenes rendered — check the page errors above"); process.exitCode = 1; }
 for (const id of ids) {
 	const el = await page.$(`#${id}`);
 	await el.screenshot({ path: `assets/${id}.png`, omitBackground: true });
 	console.log("captured assets/%s.png", id);
 }
+
+// Measurements made by the page for the scenes that ask for them (the README quotes these).
+const measurements = await page.evaluate(() => window.__measurements ?? []);
+if (measurements.length) console.log("measurements %s", JSON.stringify(measurements, null, "\t"));
 
 await browser.close();
 server.close();

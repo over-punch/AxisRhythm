@@ -30,6 +30,10 @@
 			   line never reaches the card edge (linePreservation keeps lines
 			   nowrap, so the widest line drives layout width). */
 			#hero .sample { max-width: 880px; }
+			/* Preservation scene: narrower type, and a dashed rule on the column's right edge so overflow shows. */
+			#preservation .col { gap: 56px; }
+			#preservation .sample { font-size: 17px; line-height: 1.7; border-right: 1px dashed rgba(239, 233, 246, 0.45); font-variation-settings: "wght" 300, "opsz" 17, "wdth" 100; }
+			.note { font: 500 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; opacity: 0.65; margin-top: 16px; }
 			.lbl {
 				font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
 				letter-spacing: 0.14em;
@@ -48,21 +52,9 @@
 	</head>
 	<body>
 		<div id="stage"></div>
-		<!-- The built bundle statically re-exports the React layer, so the browser
-		     must resolve the bare "react" specifiers even though we only use the
-		     vanilla functions. Stub them with empty modules — never invoked here. -->
-		<script type="importmap">
-			{
-				"imports": {
-					"react": "data:text/javascript,export default {};export const useRef=()=>({});export const useCallback=(f)=>f;export const useLayoutEffect=()=>{};export const useEffect=()=>{};export const forwardRef=(f)=>f;",
-					"react-dom": "data:text/javascript,export default {};",
-					"react/jsx-runtime": "data:text/javascript,export const jsx=()=>null;export const jsxs=()=>null;export const Fragment={};"
-				}
-			}
-		</script>
 		<script type="module">
-			// Mount the real, built package (vanilla entry — no React needed).
-			import { applyAxisRhythm, getCleanHTML } from "/dist/index.js";
+			// Mount the real, built package through its React-free entry (@overpunch/axisrhythm/core).
+			import { applyAxisRhythm, getCleanHTML } from "/dist/core.js";
 
 			const COPY = `Applied line by line, a variable font axis gives you something CSS cannot: a paragraph with rhythm. Each line carries a different setting, yet the text reads as one. The difference is a texture the eye feels before the mind names it — a quiet landmark on every line.`;
 
@@ -86,7 +78,30 @@
 						{ label: "axis rhythm (wght per line)", cfg: { axis: "wght", values: [640, 300], period: 2, linePreservation: "spacing" } },
 					],
 				},
+				{
+					id: "preservation",
+					bg: "#0e0b16",
+					fg: "#efe9f6",
+					// Same text, same axis values, the three linePreservation modes. measure: true writes the
+					// measured overflow under each pane and into window.__measurements.
+					panes: ["none", "spacing", "scale"].map((mode) => ({
+						label: `linePreservation: '${mode}'`,
+						measure: true,
+						cfg: { axis: "wght", values: [900, 300], period: 2, linePreservation: mode },
+					})),
+				},
 			];
+
+			/** Left and right edge of each line (the union of its .ar-line runs), by line index. */
+			function lineEdges(p) {
+				const lines = new Map();
+				p.querySelectorAll(".ar-line").forEach((run) => {
+					const r = run.getBoundingClientRect();
+					const cur = lines.get(run.dataset.arLine) ?? { left: Infinity, right: -Infinity };
+					lines.set(run.dataset.arLine, { left: Math.min(cur.left, r.left), right: Math.max(cur.right, r.right) });
+				});
+				return [...lines.values()];
+			}
 
 			const stage = document.getElementById("stage");
 			for (const scene of SCENES) {
@@ -116,6 +131,8 @@
 					col.appendChild(wrap);
 					// Stash the element + its options for the post-font-load pass.
 					p.__cfg = pane.cfg;
+					p.__measure = pane.measure;
+					p.__scene = scene.id;
 				}
 				stage.appendChild(el);
 			}
@@ -123,6 +140,7 @@
 			// Apply only after the variable font is actually ready, so line
 			// detection measures the real glyph metrics (per the library's own
 			// document.fonts.ready guidance).
+			window.__measurements = [];
 			window.__ready = (async () => {
 				await document.fonts.ready;
 				// Force the face to load by laying out a sample.
@@ -130,7 +148,32 @@
 					const cfg = p.__cfg;
 					if (!cfg) return; // plain-CSS pane stays untouched
 					const original = getCleanHTML(p);
+					if (!p.__measure) { applyAxisRhythm(p, original, cfg); return; }
+
+					// Natural line lengths: the same lines with every line at the paragraph's own axis value.
+					const base = Number(/"wght" (\d+)/.exec(getComputedStyle(p).fontVariationSettings)?.[1] ?? 400);
+					applyAxisRhythm(p, original, { ...cfg, values: [base, base], linePreservation: "none" });
+					const natural = lineEdges(p).map((l) => l.right - l.left);
 					applyAxisRhythm(p, original, cfg);
+					const edges = lineEdges(p);
+					const cs = getComputedStyle(p);
+					const box = p.getBoundingClientRect();
+					const columnRight = box.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight);
+					const overflow = Math.max(0, ...edges.map((l) => l.right - columnRight));
+					const drift = Math.max(...edges.map((l, i) => Math.abs(l.right - l.left - natural[i])));
+					const m = { scene: p.__scene, mode: cfg.linePreservation, lines: edges.length, columnPx: +(columnRight - box.left).toFixed(1), maxOverflowPx: +overflow.toFixed(2), maxLineLengthChangePx: +drift.toFixed(2) };
+					// Cost of one full apply (reset, measure lines, style them), median of 25 runs on this paragraph.
+					const times = [];
+					for (let k = 0; k < 25; k++) { const t0 = performance.now(); applyAxisRhythm(p, original, cfg); p.getBoundingClientRect(); times.push(performance.now() - t0); }
+					times.sort((x, y) => x - y);
+					m.words = original.trim().split(/\s+/).length;
+					m.applyMsMedian = +times[12].toFixed(2);
+					m.applyMsMax = +times[24].toFixed(2);
+					window.__measurements.push(m);
+					const note = document.createElement("div");
+					note.className = "note";
+					note.textContent = `line lengths change by up to ${m.maxLineLengthChangePx.toFixed(1)} px · ${m.maxOverflowPx > 0.5 ? m.maxOverflowPx.toFixed(1) + " px past the column" : "inside the column"}`;
+					p.after(note);
 				});
 			})();
 		</script>
