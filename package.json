@@ -1,6 +1,6 @@
 {
 	"name": "@overpunch/axisrhythm",
-	"version": "1.3.0",
+	"version": "1.3.1",
 	"description": "Deliberate variable font axis rhythm across paragraph lines — alternating wdth/wght values for typographic texture",
 	"type": "module",
 	"main": "dist/index.cjs",
