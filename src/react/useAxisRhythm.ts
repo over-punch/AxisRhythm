@@ -6,8 +6,8 @@ import type { AxisRhythmOptions } from '../core/types'
 /**
  * React hook that applies the axis-rhythm effect to a ref'd element.
  * When `options.animate` is true, starts a continuous rAF wave via `startAxisRhythm`
- * and returns a stop function on unmount. Otherwise uses `applyAxisRhythm` as a
- * static snapshot and re-runs on resize (width changes only).
+ * and stops it on unmount. Otherwise uses `applyAxisRhythm` as a static snapshot.
+ * Both modes re-measure the lines when the element's width changes (the animation restarts).
  *
  * When `options.intersect` is true:
  * - Static mode: skips the initial layout pass; an IntersectionObserver runs
@@ -59,10 +59,29 @@ export function useAxisRhythm(options: AxisRhythmOptions, contentKey?: string) {
 		const el = ref.current
 		if (!el) return
 
-		// Animated mode: startAxisRhythm handles its own IntersectionObserver internally.
+		// Animated mode: startAxisRhythm handles its own IntersectionObserver internally, but it does not
+		// watch the element's width. The lines are locked where they were measured, so a narrower container
+		// would leave them overflowing: restart (re-measure the lines) when the width changes.
 		if (optionsRef.current.animate) {
 			run()
+			let ro: ResizeObserver | null = null
+			let roRafId = 0
+			if (typeof ResizeObserver !== 'undefined') {
+				// The observer reports once on observe(); that first width is the one run() just measured.
+				let lastWidth = -1
+				ro = new ResizeObserver((entries) => {
+					const w = Math.round(entries[0].contentRect.width)
+					if (lastWidth < 0) { lastWidth = w; return }
+					if (w === lastWidth) return
+					lastWidth = w
+					cancelAnimationFrame(roRafId)
+					roRafId = requestAnimationFrame(run)
+				})
+				ro.observe(el)
+			}
 			return () => {
+				ro?.disconnect()
+				cancelAnimationFrame(roRafId)
 				if (stopRef.current) {
 					stopRef.current()
 					stopRef.current = null

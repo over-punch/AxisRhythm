@@ -109,6 +109,49 @@ describe('useAxisRhythm', () => {
 		}).not.toThrow()
 	})
 
+	it('re-measures the lines when the width changes in animate mode', () => {
+		// Regression: the animated branch never observed the element, so after the container narrowed the
+		// lines stayed locked at their old breaks and overflowed (336 px in the site demo, 1440 → 800 px).
+		const observers: { cb: ResizeObserverCallback; targets: Element[] }[] = []
+		class FakeResizeObserver {
+			private record: { cb: ResizeObserverCallback; targets: Element[] }
+			constructor(cb: ResizeObserverCallback) { this.record = { cb, targets: [] }; observers.push(this.record) }
+			observe(target: Element) { this.record.targets.push(target) }
+			unobserve() {}
+			disconnect() { this.record.targets.length = 0 }
+		}
+		vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+		// Run rAF callbacks synchronously, once each (the wave's own loop is not followed).
+		let depth = 0
+		vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => { if (depth === 0) { depth++; fn(0); depth-- } return 1 })
+		vi.stubGlobal('cancelAnimationFrame', () => {})
+
+		const { container, unmount } = render(
+			<AxisRhythmText axis="wdth" values={[100, 96]} period={2} animate>
+				one two three four five six seven eight nine ten eleven twelve thirteen fourteen
+			</AxisRhythmText>,
+		)
+		const el = container.firstElementChild as HTMLElement
+		const observed = observers.filter((o) => o.targets.includes(el))
+		expect(observed.length).toBe(1)
+
+		/** Reports a content width to the hook's observer. */
+		const report = (width: number) => act(() => { observed[0].cb([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver) })
+		report(600) // the initial report on observe(): the width already measured
+		const before = el.querySelector(`.${AXIS_RHYTHM_CLASSES.line}`)
+		expect(before).not.toBeNull()
+		report(600)
+		expect(el.querySelector(`.${AXIS_RHYTHM_CLASSES.line}`)).toBe(before) // same width: nothing rebuilt
+		report(300)
+		const after = el.querySelector(`.${AXIS_RHYTHM_CLASSES.line}`)
+		expect(after).not.toBeNull()
+		expect(after).not.toBe(before) // narrower: lines rebuilt from the original text
+
+		unmount()
+		expect(observed[0].targets.length).toBe(0)
+		vi.unstubAllGlobals()
+	})
+
 	it('mounts without throwing with align bottom', () => {
 		expect(() => {
 			renderHook(() => useAxisRhythm({ axis: 'wdth', values: [100, 96], period: 2, align: 'bottom' }))
