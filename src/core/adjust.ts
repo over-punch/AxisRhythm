@@ -647,20 +647,25 @@ export function applyAxisRhythm(
 		// Preservation path: measure natural widths before applying axis values,
 		// then apply compensation (letter-spacing or scaleX) to keep line lengths stable.
 
-		// Batch read 1: natural widths (runs inherit parent's fontVariationSettings).
+		// Batch read 1: natural widths (runs inherit parent's fontVariationSettings), and in 'scale' mode
+		// where each line's box starts.
 		const naturalWidths = lines.map(lineWidth)
+		const naturalLefts = linePreservation === 'scale' ? lines.map(lineLeft) : []
 		// Apply axis values to all runs, preserving all other parent axes.
 		lines.forEach((_, i) => setAxis(i))
-		// Batch read 2: widths after axis application.
+		// Batch read 2: widths (and box positions) after axis application.
 		const axisWidths = lines.map(lineWidth)
+		const axisLefts = linePreservation === 'scale' ? lines.map(lineLeft) : []
 
 		if (linePreservation === 'spacing') {
 			// Adjust letter-spacing per line so the total advance width matches
 			// the natural (un-modified) width. Same technique as HoverBoldly.
 			// Added on top of the author's own letter-spacing, which the line would otherwise lose.
 			const baseSpacing = authorLetterSpacing(element)
+			const zoom = cssZoom(element)
 			lines.forEach((runs, i) => {
-				const delta = naturalWidths[i] - axisWidths[i]
+				// Measured in zoomed pixels; letter-spacing is in CSS pixels.
+				const delta = (naturalWidths[i] - axisWidths[i]) / zoom
 				const charCount = lineChars(runs)
 				const fontSize = parseFloat(getComputedStyle(runs[0]).fontSize)
 				if (charCount > 0) runs.forEach((run) => {
@@ -670,9 +675,11 @@ export function applyAxisRhythm(
 		} else {
 			// Apply a scaleX transform so each line visually occupies its natural width. The box keeps
 			// its own width (scaling a box already widened to the natural width would scale it twice).
+			// A box anchored on the right or the middle (right-to-left, right-aligned or centred text) also
+			// moves when its width changes, so it is shifted back to where it started.
 			lines.forEach(([el], i) => {
 				if (axisWidths[i] > 0 && naturalWidths[i] > 0) {
-					el.style.transform = `scaleX(${(naturalWidths[i] / axisWidths[i]).toFixed(6)})`
+					el.style.transform = scaleTransform(naturalWidths[i], naturalLefts[i], axisWidths[i], axisLefts[i])
 					el.style.transformOrigin = 'left center'
 				}
 			})
@@ -691,6 +698,39 @@ export function applyAxisRhythm(
 function authorLetterSpacing(el: HTMLElement): string {
 	const ls = getComputedStyle(el).letterSpacing
 	return !ls || ls === 'normal' ? '0px' : ls
+}
+
+/**
+ * The CSS `zoom` in effect on an element (its own and its ancestors'), 1 when there is none or the browser
+ * doesn't report it. getBoundingClientRect() measures in zoomed pixels, while letter-spacing and font-size are
+ * in CSS pixels, so a measured width has to be divided by this before it becomes a letter-spacing.
+ */
+function cssZoom(el: HTMLElement): number {
+	const zoom = (el as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom
+	return typeof zoom === 'number' && zoom > 0 ? zoom : 1
+}
+
+/** The left edge of a 'scale' line's box in viewport pixels (one box per line in that mode). */
+function lineLeft(runs: HTMLElement[]): number {
+	return runs[0].getBoundingClientRect().left
+}
+
+/**
+ * The transform that puts a 'scale' line back where it was before the axis changed its width: scaled to its
+ * natural width and, where the wider or narrower box moved (right-to-left, right-aligned or centred text, where
+ * the box is anchored on the right or the middle), shifted back to its natural left edge. Origin: left center.
+ * The shift is written as a percentage of the box's own width, a ratio of two measurements, so it stays
+ * right when the page is zoomed with CSS `zoom` (measured pixels and CSS pixels differ there).
+ *
+ * @param naturalWidth - line width before the axis value was applied (px)
+ * @param naturalLeft  - left edge before the axis value was applied (px)
+ * @param width        - line width with the axis value applied, untransformed (px)
+ * @param left         - left edge with the axis value applied, untransformed (px)
+ */
+function scaleTransform(naturalWidth: number, naturalLeft: number, width: number, left: number): string {
+	const shift = naturalLeft - left
+	const scale = `scaleX(${(naturalWidth / width).toFixed(6)})`
+	return Math.abs(shift) < 0.01 ? scale : `translateX(${((shift / width) * 100).toFixed(4)}%) ${scale}`
 }
 
 /** The rendered width of a line: the sum of its runs (each run sits on one line). */
@@ -950,14 +990,21 @@ export function startAxisRhythm(
 	const lo = Math.min(...values), hi = Math.max(...values)
 	const baseSpacing = authorLetterSpacing(element)
 	let natural: number[] = [], widthLo: number[] = [], widthHi: number[] = [], chars: number[] = [], fontSizes: number[] = []
+	// 'scale' only: each line box's left edge at its natural width and at the lowest and highest axis values
+	let naturalLeft: number[] = [], leftLo: number[] = [], leftHi: number[] = []
+	const scaling = linePreservation === 'scale'
+	const zoom = cssZoom(element)
 	if (linePreservation !== 'none' && hi !== lo) {
 		const all = lines.flat()
 		all.forEach((el) => { el.style.letterSpacing = ''; el.style.transform = ''; el.style.width = ''; el.style.fontVariationSettings = baseFVS })
 		natural = lines.map(lineWidth)
+		if (scaling) naturalLeft = lines.map(lineLeft)
 		all.forEach((el) => { el.style.fontVariationSettings = overrideAxis(baseFVS, axis, lo) })
 		widthLo = lines.map(lineWidth)
+		if (scaling) leftLo = lines.map(lineLeft)
 		all.forEach((el) => { el.style.fontVariationSettings = overrideAxis(baseFVS, axis, hi) })
 		widthHi = lines.map(lineWidth)
+		if (scaling) leftHi = lines.map(lineLeft)
 		chars = lines.map(lineChars)
 		fontSizes = lines.map((runs) => parseFloat(getComputedStyle(runs[0]).fontSize) || 0)
 	}
@@ -967,12 +1014,13 @@ export function startAxisRhythm(
 		const fvs = overrideAxis(baseFVS, axis, value)
 		runs.forEach((el) => { el.style.fontVariationSettings = fvs })
 		if (!natural.length) return
-		const w = widthLo[i] + (widthHi[i] - widthLo[i]) * (value - lo) / (hi - lo)
+		const t = (value - lo) / (hi - lo)
+		const w = widthLo[i] + (widthHi[i] - widthLo[i]) * t
 		if (linePreservation === 'spacing' && chars[i] > 0 && fontSizes[i] > 0) {
-			const ls = `calc(${baseSpacing} + ${((natural[i] - w) / chars[i]) / fontSizes[i]}em)`
+			const ls = `calc(${baseSpacing} + ${((natural[i] - w) / zoom / chars[i]) / fontSizes[i]}em)`
 			runs.forEach((el) => { el.style.letterSpacing = ls })
 		} else if (linePreservation === 'scale' && w > 0 && natural[i] > 0) {
-			runs[0].style.transform = `scaleX(${(natural[i] / w).toFixed(6)})`
+			runs[0].style.transform = scaleTransform(natural[i], naturalLeft[i], w, leftLo[i] + (leftHi[i] - leftLo[i]) * t)
 			runs[0].style.transformOrigin = 'left center'
 		}
 	}

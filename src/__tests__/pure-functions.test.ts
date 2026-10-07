@@ -236,6 +236,89 @@ describe("linePreservation: 'scale'", () => {
 	})
 })
 
+describe("linePreservation: 'spacing' under CSS zoom", () => {
+	let cleanup: (() => void) | null = null
+	beforeEach(() => { document.body.innerHTML = ''; cleanup = mockMeasurement() })
+	afterEach(() => { cleanup?.(); cleanup = null; vi.restoreAllMocks() })
+
+	/**
+	 * The letter-spacing (em) given to the first line when its runs measure 200 px at their natural weight and
+	 * 240 px at wght 700, with the element reporting the given CSS zoom.
+	 */
+	function firstLineSpacing(zoom: number | undefined): number {
+		const el = makeElement(nWords(14))
+		if (zoom !== undefined) Object.defineProperty(el, 'currentCSSZoom', { configurable: true, value: zoom })
+		const base = Element.prototype.getBoundingClientRect
+		vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+			const node = this as HTMLElement
+			if (!node.classList?.contains(AXIS_RHYTHM_CLASSES.line)) return base.call(this)
+			const width = node.style.fontVariationSettings.includes('700') ? 240 : 200
+			return { width, left: 0, right: width, top: 0, bottom: 20, height: 20, x: 0, y: 0, toJSON: () => {} } as DOMRect
+		})
+		applyAxisRhythm(el, getCleanHTML(el), { axis: 'wght', values: [700, 300], period: 2, linePreservation: 'spacing' })
+		vi.restoreAllMocks()
+		const line = el.querySelector<HTMLElement>(`.${AXIS_RHYTHM_CLASSES.line}`)!
+		const em = /\+ (-?[\d.e-]+)em\)/.exec(line.style.letterSpacing)
+		expect(em).not.toBeNull()
+		return Number(em![1])
+	}
+
+	// Regression: widths are measured in zoomed pixels but letter-spacing is in CSS pixels, so inside an
+	// element with CSS zoom the correction was multiplied by the zoom. Measured in Chromium (Merriweather
+	// 17 px, wght 900 / 300, 300 px column): lines ended up to 44.8 px short at zoom 1.9 and 6.6 px long at 0.5.
+	it('divides the measured difference by the zoom', () => {
+		const plain = firstLineSpacing(undefined)
+		expect(plain).toBeLessThan(0)
+		expect(firstLineSpacing(1)).toBeCloseTo(plain, 10)
+		expect(firstLineSpacing(2)).toBeCloseTo(plain / 2, 10)
+		expect(firstLineSpacing(0.5)).toBeCloseTo(plain * 2, 10)
+	})
+})
+
+describe("linePreservation: 'scale' keeps each line where it was", () => {
+	let cleanup: (() => void) | null = null
+	beforeEach(() => { document.body.innerHTML = ''; cleanup = mockMeasurement() })
+	afterEach(() => { cleanup?.(); cleanup = null; vi.restoreAllMocks() })
+
+	/**
+	 * Applies 'scale' (wght 700 / 300 per line) with line boxes that measure 200 px wide at their natural
+	 * weight and 240 px at 700. `leftAt700` is where the browser puts the wider box: 100 (unchanged) when the
+	 * line is anchored on the left, 60 when it is anchored on the right (right-to-left or right-aligned text).
+	 */
+	function transforms(leftAt700: number): string[] {
+		const el = makeElement(nWords(14))
+		const base = Element.prototype.getBoundingClientRect
+		vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+			const node = this as HTMLElement
+			if (!node.classList?.contains(AXIS_RHYTHM_CLASSES.line)) return base.call(this)
+			const bold = node.style.fontVariationSettings.includes('700')
+			const left = bold ? leftAt700 : 100, width = bold ? 240 : 200
+			return { width, left, right: left + width, top: 0, bottom: 20, height: 20, x: left, y: 0, toJSON: () => {} } as DOMRect
+		})
+		applyAxisRhythm(el, getCleanHTML(el), { axis: 'wght', values: [700, 300], period: 2, linePreservation: 'scale' })
+		const lines = [...el.querySelectorAll<HTMLElement>(`.${AXIS_RHYTHM_CLASSES.line}`)]
+		expect(lines.length).toBeGreaterThanOrEqual(2)
+		lines.forEach((line) => expect(line.style.transformOrigin).toBe('left center'))
+		return lines.map((line) => line.style.transform)
+	}
+
+	it('only scales a line anchored on the left', () => {
+		const [bold, light] = transforms(100)
+		expect(bold).toBe('scaleX(0.833333)')
+		expect(light).toBe('scaleX(1.000000)')
+	})
+
+	// Regression: lines were only scaled from their left edge. A right-to-left line is anchored on the right,
+	// so the wider box grows to the left and scaling from the left pulled its right edge in instead: it kept
+	// its whole overflow (88 px in Chromium, the same as with no preservation: Noto Sans Arabic, wght 700 on
+	// a 300 base, 1024 px column). The box is now also moved back to its natural left edge.
+	it('moves a line anchored on the right back to its natural left edge', () => {
+		const [bold, light] = transforms(60)
+		expect(bold).toBe('translateX(16.6667%) scaleX(0.833333)') // 40 px of the 240 px box
+		expect(light).toBe('scaleX(1.000000)')
+	})
+})
+
 // ─── getCleanHTML legacy selector and br removal ─────────────────────────────
 
 describe('getCleanHTML edge cases', () => {
